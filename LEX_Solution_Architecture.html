@@ -1,0 +1,336 @@
+<title>LEX Solution Architecture</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800;900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --paper:#eef1ef;
+    --paper-raised:#ffffff;
+    --ink:#121a1f;
+    --ink-dim:#4b5a61;
+    --line:#c7d1cd;
+    --steel:#33505c;
+    --steel-soft:#5c7681;
+    --amber:#b06b17;
+    --amber-bg:#f3e3cd;
+    --crossregion:#2f6a86;
+    --font-display:"Big Shoulders Display", "Arial Narrow", sans-serif;
+    --font-body:"IBM Plex Sans", "Segoe UI", sans-serif;
+    --font-mono:"IBM Plex Mono", "Consolas", monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#101718;
+      --paper-raised:#172223;
+      --ink:#e7ede9;
+      --ink-dim:#9db0aa;
+      --line:#2b3a3a;
+      --steel:#8fb4bb;
+      --steel-soft:#6f8f95;
+      --amber:#dda054;
+      --amber-bg:#3a2c17;
+      --crossregion:#7fb8d1;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#101718;
+    --paper-raised:#172223;
+    --ink:#e7ede9;
+    --ink-dim:#9db0aa;
+    --line:#2b3a3a;
+    --steel:#8fb4bb;
+    --steel-soft:#6f8f95;
+    --amber:#dda054;
+    --amber-bg:#3a2c17;
+    --crossregion:#7fb8d1;
+  }
+
+  *{box-sizing:border-box;}
+  body{background:var(--paper); color:var(--ink); font-family:var(--font-body); line-height:1.55; -webkit-font-smoothing:antialiased;}
+  h1,h2{font-family:var(--font-display); text-wrap:balance; margin:0; color:var(--ink);}
+  code{font-family:var(--font-mono);}
+
+  .page{max-width:1560px; margin:0 auto; padding:2.4rem clamp(1rem,3vw,2.6rem) 3.5rem;}
+
+  .masthead{display:flex; justify-content:space-between; align-items:flex-end; gap:1.5rem; flex-wrap:wrap;
+    padding-bottom:1.2rem; border-bottom:3px solid var(--steel); margin-bottom:1.6rem;}
+  .mast-title{font-size:clamp(1.9rem,3.6vw,2.7rem); font-weight:800; letter-spacing:0.01em;}
+  .mast-sub{font-family:var(--font-mono); font-size:0.78rem; color:var(--ink-dim); margin-top:0.35rem; letter-spacing:0.02em;}
+  .meta{display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:flex-end;}
+  .chip{font-family:var(--font-mono); font-size:0.68rem; padding:0.28rem 0.65rem; border:1px solid var(--line); border-radius:999px; color:var(--ink-dim);}
+
+  .diagram-frame{background:var(--paper-raised); border:1px solid var(--line); border-radius:6px; padding:1.2rem 1.2rem 0.8rem; overflow-x:auto;}
+  figure{margin:0;}
+  figure svg{width:100%; height:auto; display:block; min-width:1100px;}
+  figcaption{font-size:0.85rem; color:var(--ink-dim); margin-top:0.8rem; max-width:92ch;}
+
+  .legend{display:flex; gap:1.4rem; flex-wrap:wrap; margin:1rem 0 2rem; padding:0.8rem 1rem; background:var(--paper-raised); border:1px solid var(--line); border-radius:6px; font-size:0.78rem; color:var(--ink-dim);}
+  .legend-item{display:flex; align-items:center; gap:0.5rem;}
+  .swatch{width:26px; height:0; border-top-width:2.5px; border-top-style:solid; display:inline-block;}
+  .swatch.perimeter{border-color:var(--steel); border-top-width:3px;}
+  .swatch.internal{border-color:var(--steel-soft);}
+  .swatch.crossregion{border-color:var(--crossregion);}
+  .swatch.auth{border-color:var(--amber);}
+  .swatch.link{border-color:var(--ink-dim); border-top-style:dashed;}
+
+  h2.section-title{font-size:1.15rem; font-weight:700; margin:0 0 0.8rem; color:var(--steel);}
+  .table-wrap{overflow-x:auto; border:1px solid var(--line); border-radius:6px; background:var(--paper-raised);}
+  table{width:100%; border-collapse:collapse; font-size:0.86rem; min-width:920px;}
+  th,td{text-align:left; padding:0.6rem 0.85rem; border-bottom:1px solid var(--line); vertical-align:top;}
+  th{font-family:var(--font-mono); font-size:0.68rem; letter-spacing:0.07em; text-transform:uppercase; color:var(--ink-dim); font-weight:500; background:var(--paper);}
+  tr:last-child td{border-bottom:none;}
+  td .mono{font-family:var(--font-mono); font-size:0.82rem; color:var(--steel);}
+  .ext{color:var(--amber); font-family:var(--font-mono); font-size:0.82rem;}
+  .cross{color:var(--crossregion); font-family:var(--font-mono); font-size:0.82rem;}
+  .none{color:var(--ink-dim); font-style:italic;}
+  .tnote{font-size:0.78rem; color:var(--ink-dim); margin-top:0.6rem;}
+
+  .foot{margin-top:2.2rem; font-size:0.8rem; color:var(--ink-dim); border-top:1px solid var(--line); padding-top:1rem;}
+</style>
+
+<div class="page">
+
+  <div class="masthead">
+    <div>
+      <div class="mast-title">LEX — Solution Architecture</div>
+      <div class="mast-sub">Contextual block diagram · users, runtime, data, network perimeter, and external connectivity</div>
+    </div>
+    <div class="meta">
+      <span class="chip">MR5 Transition Contracts Team</span>
+      <span class="chip">LEXDB · LEX_COMPUTE_POOL (proposed)</span>
+      <span class="chip">Build phase — MTMWH02</span>
+    </div>
+  </div>
+
+  <div class="diagram-frame">
+    <figure>
+      <svg viewBox="0 0 1520 800" role="img" aria-label="A security perimeter, connected over Azure Private Link with no public internet, encloses the entire MTM Network on one side — corporate users plus MTM's own Microsoft 365 tenant, including the SharePoint library holding the Signed and Executed Contracts — and the Snowflake account, hosted on MTM's Azure cloud, on the other. Inside Snowflake, three to five named users, gated by the LEX_USERS role, reach LEX_APP on the LEX_COMPUTE_POOL compute pool, which issues SQL through the MTMWH02 warehouse to read and write RAW_DOCUMENTS, DOCUMENT_INDEX, CONTRACT_REGISTER, CONTRACT_DOCUMENT_LINK, CONTRACT_FIELD_EXTRACTS and DOCS_STAGE in LEXDB.DATA_LEX, and PROJECTS, PROJECT_SYNC_LOG and PROJECT_QUERY_LOG in MEDSOCMS.APP_CATALOG. Snowflake reaches the contracts library using a service-account Azure AD app registration with Sites.Selected scope, entirely within this same security perimeter — no external internet hop is involved, since the library is MTM's own asset. The one path that does cross the perimeter is a cross-region inference call from the warehouse to Snowflake Cortex running in the AWS Australia region, needed for AI_COMPLETE, AI_EMBED and AI_PARSE_DOCUMENT. Citations in chat and Contract Register answers link directly from the user's browser to the contract document, bypassing Snowflake, while staying inside the same MTM network.">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+          <marker id="arrowAmber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#b06b17"/>
+          </marker>
+          <marker id="arrowCross" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#2f6a86"/>
+          </marker>
+        </defs>
+
+        <g font-family="IBM Plex Mono, monospace">
+
+          <!-- ===================== SECURITY PERIMETER ===================== -->
+          <rect x="10" y="55" width="1160" height="690" rx="4" fill="none" stroke="currentColor" stroke-width="2.6"/>
+          <text x="30" y="79" font-size="12" letter-spacing="1" fill="currentColor" font-weight="600">SECURITY PERIMETER — no public internet for user or SharePoint traffic</text>
+          <text x="30" y="95" font-size="9.5" fill="currentColor" opacity="0.8">Azure Private Link connects MTM Network ⇄ Snowflake; everything inside this line stays off the public internet</text>
+
+          <!-- ===================== MTM NETWORK ===================== -->
+          <rect x="30" y="115" width="240" height="580" rx="3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="4 4" opacity="0.6"/>
+          <text x="45" y="137" font-size="10.5" letter-spacing="1" fill="currentColor" opacity="0.85">MTM NETWORK</text>
+          <text x="45" y="151" font-size="8.5" fill="currentColor" opacity="0.7">corporate network + Microsoft 365 tenant</text>
+
+          <rect x="45" y="160" width="210" height="140" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="150" y="190" text-anchor="middle" font-size="12.5" fill="currentColor">3–5 Named Users</text>
+          <text x="150" y="207" text-anchor="middle" font-size="10" fill="currentColor">MR5 Transition Contracts Team</text>
+          <text x="150" y="228" text-anchor="middle" font-size="9.5" fill="currentColor" opacity="0.85">access via LEX_USERS role</text>
+          <text x="150" y="242" text-anchor="middle" font-size="9.5" fill="currentColor" opacity="0.85">only — no app-level login</text>
+
+          <!-- Microsoft Graph API (MTM's own M365 tenant, inside MTM Network) -->
+          <rect x="45" y="340" width="210" height="110" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="150" y="364" text-anchor="middle" font-size="11.5" fill="currentColor">Microsoft Graph API</text>
+          <text x="150" y="380" text-anchor="middle" font-size="8.5" fill="currentColor" opacity="0.85">login.microsoftonline.com</text>
+          <text x="150" y="393" text-anchor="middle" font-size="8.5" fill="currentColor" opacity="0.85">graph.microsoft.com</text>
+          <text x="150" y="412" text-anchor="middle" font-size="8" fill="currentColor" opacity="0.8">client = dedicated Azure AD App</text>
+          <text x="150" y="424" text-anchor="middle" font-size="8" fill="currentColor" opacity="0.8">Registration (service account) · Sites.Selected</text>
+
+          <line x1="150" y1="450" x2="150" y2="486" stroke="currentColor" stroke-width="1.4" marker-end="url(#arrow)"/>
+          <text x="196" y="472" text-anchor="middle" font-size="8.5" fill="currentColor">Sites.Selected</text>
+
+          <!-- SharePoint / network drive (MTM's own tenant, inside MTM Network) -->
+          <rect x="45" y="490" width="210" height="155" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="150" y="514" text-anchor="middle" font-size="11.5" fill="currentColor">Network drive</text>
+          <text x="150" y="530" text-anchor="middle" font-size="9" fill="currentColor" opacity="0.85">SharePoint, MTM's own tenant</text>
+          <text x="150" y="548" text-anchor="middle" font-size="8.5" fill="currentColor" opacity="0.8">Signed &amp; Executed Contracts:</text>
+          <text x="150" y="562" text-anchor="middle" font-size="8.5" fill="currentColor" opacity="0.8">base agreements plus their</text>
+          <text x="150" y="576" text-anchor="middle" font-size="8.5" fill="currentColor" opacity="0.8">variations, extensions and</text>
+          <text x="150" y="590" text-anchor="middle" font-size="8.5" fill="currentColor" opacity="0.8">novation deeds</text>
+          <text x="150" y="612" text-anchor="middle" font-size="8" fill="currentColor" opacity="0.75">webUrl captured per file as SOURCE_URL</text>
+          <text x="150" y="634" text-anchor="middle" font-size="8" fill="currentColor" opacity="0.75">MTM-owned asset — inside the perimeter</text>
+
+          <!-- Citation bypass: Users -> network drive, both inside MTM Network -->
+          <path d="M 45 260 L 20 260 L 20 566 L 41 566" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="3 5" opacity="0.75" marker-end="url(#arrow)"/>
+          <text x="14" y="410" font-size="8" fill="currentColor" opacity="0.85" transform="rotate(-90 14 410)">citation link (direct)</text>
+
+          <!-- ===================== SNOWFLAKE ACCOUNT ===================== -->
+          <rect x="300" y="100" width="840" height="610" rx="4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="4 4" opacity="0.6"/>
+          <text x="318" y="122" font-size="10.5" letter-spacing="1" fill="currentColor" opacity="0.85">SNOWFLAKE ACCOUNT — hosted on Azure (MTM tenant)</text>
+
+          <!-- Compute Pool / Streamlit app -->
+          <rect x="330" y="160" width="340" height="130" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="500" y="184" text-anchor="middle" font-size="12.5" fill="currentColor">LEX_APP</text>
+          <text x="500" y="200" text-anchor="middle" font-size="10" fill="currentColor">Streamlit-in-Snowflake (container)</text>
+          <text x="500" y="216" text-anchor="middle" font-size="10" fill="currentColor">Chat · Contract Register · Data Sources</text>
+          <text x="500" y="236" text-anchor="middle" font-size="9.5" fill="currentColor" opacity="0.85">runs on compute pool ↓</text>
+          <text x="500" y="252" text-anchor="middle" font-size="10.5" fill="currentColor" font-weight="600">LEX_COMPUTE_POOL</text>
+          <text x="500" y="266" text-anchor="middle" font-size="9" fill="currentColor" opacity="0.8">(dedicated, not shared)</text>
+
+          <!-- Warehouse -->
+          <rect x="710" y="160" width="340" height="130" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="880" y="184" text-anchor="middle" font-size="12.5" fill="currentColor">WAREHOUSE — MTMWH02</text>
+          <text x="880" y="200" text-anchor="middle" font-size="9.5" fill="currentColor" opacity="0.85">(build; swaps to prod WH at go-live)</text>
+          <text x="880" y="220" text-anchor="middle" font-size="10" fill="currentColor">Executes SQL + Cortex calls:</text>
+          <text x="880" y="237" text-anchor="middle" font-size="10" fill="currentColor">AI_PARSE_DOCUMENT · AI_EMBED</text>
+          <text x="880" y="253" text-anchor="middle" font-size="10" fill="currentColor">AI_COMPLETE</text>
+
+          <!-- Users -> ComputePool (Private Link, inside perimeter) -->
+          <line x1="255" y1="228" x2="326" y2="222" stroke="currentColor" stroke-width="1.4" marker-end="url(#arrow)"/>
+          <text x="290" y="208" text-anchor="middle" font-size="9.5" fill="currentColor">Private Link</text>
+          <text x="290" y="245" text-anchor="middle" font-size="8" fill="currentColor" opacity="0.85">gated by LEX_USERS role</text>
+
+          <!-- ComputePool <-> Warehouse -->
+          <line x1="670" y1="222" x2="706" y2="222" stroke="currentColor" stroke-width="1.4" marker-end="url(#arrow)"/>
+          <text x="688" y="208" text-anchor="middle" font-size="8.5" fill="currentColor">SQL</text>
+
+          <!-- Data layer: LEXDB.DATA_LEX -->
+          <rect x="330" y="330" width="340" height="200" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="500" y="354" text-anchor="middle" font-size="12.5" fill="currentColor">LEXDB . DATA_LEX</text>
+          <line x1="350" y1="366" x2="650" y2="366" stroke="currentColor" stroke-width="0.6" opacity="0.4"/>
+          <text x="350" y="384" font-size="9.5" fill="currentColor">• RAW_DOCUMENTS / DOCS_STAGE</text>
+          <text x="362" y="397" font-size="8.5" fill="currentColor" opacity="0.8">parsed text, SOURCE_URL, hash</text>
+          <text x="350" y="415" font-size="9.5" fill="currentColor">• DOCUMENT_INDEX</text>
+          <text x="362" y="428" font-size="8.5" fill="currentColor" opacity="0.8">clause tree, summaries, embeddings</text>
+          <text x="350" y="446" font-size="9.5" fill="currentColor">• CONTRACT_REGISTER + LINK</text>
+          <text x="362" y="459" font-size="8.5" fill="currentColor" opacity="0.8">base/variation/extension family</text>
+          <text x="350" y="477" font-size="9.5" fill="currentColor">• CONTRACT_FIELD_EXTRACTS</text>
+          <text x="362" y="490" font-size="8.5" fill="currentColor" opacity="0.8">16 fields, citation, confidence, verified</text>
+          <text x="350" y="512" font-size="8" fill="currentColor" opacity="0.7">the four tables above are LEX-specific —</text>
+          <text x="350" y="524" font-size="8" fill="currentColor" opacity="0.7">not part of the shared template today</text>
+
+          <!-- Data layer: MEDSOCMS.APP_CATALOG -->
+          <rect x="710" y="330" width="340" height="160" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="880" y="354" text-anchor="middle" font-size="12.5" fill="currentColor">MEDSOCMS . APP_CATALOG</text>
+          <line x1="730" y1="366" x2="1030" y2="366" stroke="currentColor" stroke-width="0.6" opacity="0.4"/>
+          <text x="730" y="386" font-size="10" fill="currentColor">• PROJECTS</text>
+          <text x="742" y="401" font-size="9" fill="currentColor" opacity="0.8">LEX's config row (shared catalog)</text>
+          <text x="730" y="420" font-size="10" fill="currentColor">• PROJECT_SYNC_LOG</text>
+          <text x="742" y="435" font-size="9" fill="currentColor" opacity="0.8">ingestion run history</text>
+          <text x="730" y="454" font-size="10" fill="currentColor">• PROJECT_QUERY_LOG</text>
+          <text x="742" y="469" font-size="9" fill="currentColor" opacity="0.8">Q&amp;A audit log (question, answer, citations)</text>
+
+          <!-- Warehouse -> LEXDB / APP_CATALOG -->
+          <path d="M 830 290 L 540 330" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#arrow)"/>
+          <text x="660" y="315" text-anchor="middle" font-size="9" fill="currentColor">reads / writes</text>
+          <line x1="880" y1="290" x2="880" y2="326" stroke="currentColor" stroke-width="1.4" marker-end="url(#arrow)"/>
+          <text x="918" y="312" text-anchor="middle" font-size="9" fill="currentColor">config / logs</text>
+
+          <!-- Outbound connectivity to the network drive (stays inside the perimeter) -->
+          <rect x="330" y="560" width="720" height="120" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="690" y="583" text-anchor="middle" font-size="11" fill="currentColor" letter-spacing="0.5">CONNECTIVITY TO THE NETWORK DRIVE — ingestion only</text>
+          <line x1="350" y1="595" x2="1030" y2="595" stroke="currentColor" stroke-width="0.6" opacity="0.4"/>
+          <text x="690" y="618" text-anchor="middle" font-size="10" fill="currentColor">LEX_GRAPH_API_SECRET (client secret)</text>
+          <text x="690" y="636" text-anchor="middle" font-size="10" fill="currentColor">LEX_GRAPH_API_NETWORK_RULE</text>
+          <text x="690" y="654" text-anchor="middle" font-size="10" fill="currentColor">LEX_GRAPH_API_ACCESS_INTEGRATION (EAI, bound to LEX_APP)</text>
+
+          <!-- ComputePool -> Connectivity box, routed through left margin channel -->
+          <path d="M 330 270 L 305 270 L 305 620 L 326 620" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#arrow)"/>
+          <text x="298" y="445" font-size="9" fill="currentColor" transform="rotate(-90 298 445)">outbound (ingest)</text>
+
+          <!-- Connectivity box -> Graph API (amber, stays inside the perimeter — MTM's own tenant) -->
+          <path d="M 326 600 L 260 395" fill="none" stroke="#b06b17" stroke-width="1.8" marker-end="url(#arrowAmber)"/>
+          <text x="325" y="490" text-anchor="middle" font-size="8.5" fill="#b06b17" transform="rotate(-52 325 490)">service-account call</text>
+
+          <!-- Warehouse -> AWS AU (cross-region, the one path that crosses the security perimeter) -->
+          <line x1="1050" y1="215" x2="1104" y2="180" stroke="#2f6a86" stroke-width="1.8" marker-end="url(#arrowCross)"/>
+          <text x="1085" y="185" text-anchor="middle" font-size="8.5" fill="#2f6a86" transform="rotate(-24 1085 185)">cross-region</text>
+
+          <!-- ===================== AWS AU REGION (outside the perimeter) ===================== -->
+          <rect x="1120" y="110" width="360" height="190" rx="4" fill="none" stroke="#2f6a86" stroke-width="1.2" stroke-dasharray="4 4"/>
+          <text x="1138" y="132" font-size="10.5" letter-spacing="1" fill="#2f6a86">AWS AU REGION</text>
+          <text x="1138" y="148" font-size="9" fill="#2f6a86" opacity="0.9">Snowflake Cortex — cross-region inference</text>
+          <line x1="1138" y1="158" x2="1462" y2="158" stroke="#2f6a86" stroke-width="0.6" opacity="0.4"/>
+          <text x="1300" y="180" text-anchor="middle" font-size="10" fill="#2f6a86">AI_COMPLETE · AI_EMBED</text>
+          <text x="1300" y="196" text-anchor="middle" font-size="10" fill="#2f6a86">AI_PARSE_DOCUMENT</text>
+          <text x="1300" y="220" text-anchor="middle" font-size="8.5" fill="#2f6a86" opacity="0.85">Snowflake-managed service; data leaves</text>
+          <text x="1300" y="234" text-anchor="middle" font-size="8.5" fill="#2f6a86" opacity="0.85">the Azure region — and this perimeter —</text>
+          <text x="1300" y="248" text-anchor="middle" font-size="8.5" fill="#2f6a86" opacity="0.85">for AI inference only</text>
+          <text x="1300" y="270" text-anchor="middle" font-size="8.5" fill="#2f6a86" opacity="0.85">enabled at account level: cross-region inference</text>
+
+        </g>
+      </svg>
+      <figcaption>The solid line is the security perimeter: the whole MTM Network — corporate users and MTM's own Microsoft 365 tenant, the contracts library included — sits inside it alongside the Snowflake account, joined by Azure Private Link. Snowflake's call to the network drive (via the Graph API, authenticating as a service-account app registration) never leaves this perimeter, because the library is MTM's own asset, not a third party. The one path that genuinely crosses the line is cross-region inference to Snowflake Cortex running in AWS AU, needed for the AI functions this tool depends on.</figcaption>
+    </figure>
+  </div>
+
+  <div class="legend">
+    <span class="legend-item"><span class="swatch perimeter"></span>Security perimeter (Private Link, no public internet)</span>
+    <span class="legend-item"><span class="swatch internal"></span>SQL / data flow (in-account)</span>
+    <span class="legend-item"><span class="swatch crossregion"></span>Crosses the perimeter (Azure → AWS AU inference)</span>
+    <span class="legend-item"><span class="swatch auth"></span>Service-account call, within the perimeter (MTM's own tenant)</span>
+    <span class="legend-item"><span class="swatch link"></span>Direct browser link (citation, bypasses the backend)</span>
+  </div>
+
+  <h2 class="section-title">What touches what, by action</h2>
+  <div class="table-wrap">
+    <table>
+      <tr><th>Action</th><th>Runs on</th><th>Snowflake objects touched</th><th>Downstream call</th></tr>
+      <tr>
+        <td>Ask a question (Chat)</td>
+        <td class="mono">LEX_APP → MTMWH02</td>
+        <td><span class="mono">DOCUMENT_INDEX</span> (read), <span class="mono">RAW_DOCUMENTS</span> (read, citations), <span class="mono">PROJECTS</span> (read config), <span class="mono">PROJECT_QUERY_LOG</span> (write)</td>
+        <td class="cross">AI_COMPLETE* (+ AI_EMBED* if vector search on)</td>
+      </tr>
+      <tr>
+        <td>Ingest a document — network drive tab</td>
+        <td class="mono">LEX_APP (compute pool)</td>
+        <td><span class="mono">RAW_DOCUMENTS</span> (write), <span class="mono">DOCS_STAGE</span> (write), <span class="mono">PROJECT_SYNC_LOG</span> (write)</td>
+        <td class="ext">MS Graph API → SharePoint — MTM's own tenant, within the perimeter</td>
+      </tr>
+      <tr>
+        <td>Ingest a document — Upload tab</td>
+        <td class="mono">LEX_APP (compute pool)</td>
+        <td><span class="mono">RAW_DOCUMENTS</span> (write), <span class="mono">DOCS_STAGE</span> (write), <span class="mono">PROJECT_SYNC_LOG</span> (write)</td>
+        <td class="cross">AI_PARSE_DOCUMENT* only — no Graph/SharePoint call</td>
+      </tr>
+      <tr>
+        <td>Index a document (chunked)</td>
+        <td class="mono">LEX_APP → MTMWH02</td>
+        <td><span class="mono">RAW_DOCUMENTS</span> (read), <span class="mono">DOCUMENT_INDEX</span> (write)</td>
+        <td class="cross">AI_COMPLETE* (+ AI_EMBED*)</td>
+      </tr>
+      <tr>
+        <td>Link a contract family</td>
+        <td class="mono">LEX_APP → MTMWH02</td>
+        <td><span class="mono">RAW_DOCUMENTS</span> (read), <span class="mono">CONTRACT_REGISTER</span> / <span class="mono">CONTRACT_DOCUMENT_LINK</span> (write)</td>
+        <td class="none">none</td>
+      </tr>
+      <tr>
+        <td>Run the 16-field extraction job</td>
+        <td class="mono">LEX_APP → MTMWH02</td>
+        <td><span class="mono">CONTRACT_DOCUMENT_LINK</span> (read family), <span class="mono">DOCUMENT_INDEX</span> (read), <span class="mono">CONTRACT_FIELD_EXTRACTS</span> (write)</td>
+        <td class="cross">AI_COMPLETE* (16 canned calls per contract family)</td>
+      </tr>
+      <tr>
+        <td>Review / verify a field — Contract Register</td>
+        <td class="mono">LEX_APP → MTMWH02</td>
+        <td><span class="mono">CONTRACT_FIELD_EXTRACTS</span> (read + write <span class="mono">IS_VERIFIED</span>)</td>
+        <td class="none">none</td>
+      </tr>
+      <tr>
+        <td>View Sync Status page</td>
+        <td class="mono">LEX_APP → MTMWH02</td>
+        <td><span class="mono">PROJECT_SYNC_LOG</span>, <span class="mono">RAW_DOCUMENTS</span>, <span class="mono">DOCUMENT_INDEX</span> (read counts)</td>
+        <td class="none">none</td>
+      </tr>
+      <tr>
+        <td>Open a citation link</td>
+        <td class="mono">User's browser, direct</td>
+        <td class="none">none — bypasses Snowflake</td>
+        <td class="ext">Network drive (SharePoint) — direct, within the MTM Network</td>
+      </tr>
+    </table>
+  </div>
+  <p class="tnote">* Cortex calls (<code>AI_COMPLETE</code>, <code>AI_EMBED</code>, <code>AI_PARSE_DOCUMENT</code>) execute via Snowflake's AWS AU cross-region inference whenever the required model isn't available in the account's home Azure region — the only call in this table that actually leaves the security perimeter.</p>
+
+  <div class="foot">
+    Companion to the <strong>LEX Delivery Plan</strong> · assumes a dedicated <code>LEXDB</code> database and <code>LEX_COMPUTE_POOL</code> compute pool, following the same pattern as FRANK's <code>MEDSGOV</code> / <code>STREAMLIT_COMPUTE_POOL_OCMS_GOVERNANCE</code> — neither created yet for LEX · <code>MTMWH02</code> as the temporary build warehouse · Azure Private Link connectivity between the MTM Network (including its SharePoint / Microsoft 365 tenant) and Snowflake · cross-region inference to AWS AU for Cortex AI functions · access under named individual logins via the <code>LEX_USERS</code> role, pending confirmation of a dedicated service account for the ingestion path.
+  </div>
+
+</div>

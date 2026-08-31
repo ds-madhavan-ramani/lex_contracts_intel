@@ -11,15 +11,18 @@ from an earlier planning pass done inside `ds-madhavan-ramani/org_mm_chat`).
 
 ## Start here
 
-- **[PLAN.md](./PLAN.md)** — objective, data model, ingestion design,
-  security/isolation approach, and the phased Build (8 contracts) → Scale
-  (600 contracts) execution roadmap.
-- **[ARCHITECTURE.md](./ARCHITECTURE.md)** — the one-page contextual
-  architecture: users → Streamlit-in-Snowflake → Snowflake data model →
-  SharePoint via Graph API, with the security perimeter and cross-region
-  Cortex inference called out.
-- A polished visual version of the same architecture diagram is published
-  at: https://claude.ai/code/artifact/ef0664c5-268e-42b8-ab4e-553e9cbb785d
+- **[LEX_Delivery_Plan.html](./LEX_Delivery_Plan.html)** ([published version](https://claude.ai/code/artifact/62475db9-d82d-41a0-b66e-1f85f2efbf4d))
+  — the full delivery plan: scope, solution approach, architecture,
+  security/access, answer-quality design, the phased Build (8 contracts)
+  → Scale (600 contracts) execution roadmap, risks, and open decisions.
+- **[LEX_Solution_Architecture.html](./LEX_Solution_Architecture.html)** ([published version](https://claude.ai/code/artifact/ef0664c5-268e-42b8-ab4e-553e9cbb785d))
+  — the contextual block-diagram architecture: users, Streamlit-in-
+  Snowflake, the `LEXDB` data model, the security perimeter (Private Link
+  + cross-region Cortex inference to AWS AU), and a table of exactly what
+  touches what by action.
+- **[PLAN.md](./PLAN.md)** / **[ARCHITECTURE.md](./ARCHITECTURE.md)** —
+  the same content in plain Markdown (Mermaid diagram included), for
+  reading directly on GitHub without opening the HTML files.
 
 ## Relationship to `project-llm-wiki`
 
