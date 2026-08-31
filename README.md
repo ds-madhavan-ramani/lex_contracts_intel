@@ -2,10 +2,12 @@
 
 **LEX** is a Streamlit-in-Snowflake tool, backed by Snowflake Cortex AI, for
 the MR5 Transition Contracts Team: enter a contract number, get its standard
-questions answered — instantly, from history, if already extracted — with a
-citation panel that opens the original document and highlights the exact
-passage an answer came from, and a one-click PDF summary. It's built on
-`project-llm-wiki`, the same reusable multi-project LLM Wiki engine that runs
+questions answered — instantly, from history, if already extracted — laid
+out exactly like the team's own **Contract Workspace Summary Template**,
+with a citation panel that opens the original document and highlights the
+exact passage an answer came from, and a one-click download of the summary
+as a matching .docx. It's built on `project-llm-wiki`, the same reusable
+multi-project LLM Wiki engine that runs
 [`ORG_MM_CHAT`](https://github.com/ds-madhavan-ramani/org_mm_chat) in
 production — LEX is the second real project forked from it.
 
@@ -21,11 +23,14 @@ production — LEX is the second real project forked from it.
 
 ## What it does
 
-- **The Required Contracts Register**: an .xlsx the team maintains, listing
-  every CW number LEX should have data for (2 today, growing toward 8 for
+- **The Required Contracts Register**: an .xlsx the team maintains
+  (`MTM_CONTRACT_WORKSPACES.xlsx` — `CONTRACT_WORKSPACE_ID` /
+  `CONTRACT_WORKSPACE_NAME` columns, one header row), listing every CW
+  number LEX should have data for (2 today, growing toward 8 for
   Build/validation, more later). Uploaded on the Data Sources page, it's
   the authoritative source of which contract numbers exist — independent of
-  which documents happen to be ingested yet.
+  which documents happen to be ingested yet — and seeds each contract's
+  title too.
 - **Source documents**: signed/executed contracts, PDF (rarely DOCX) only,
   held on the team's SharePoint/network-drive folder. A file whose name or
   text doesn't show a marker like "Signed" or "Executed" is still ingested
@@ -37,15 +42,23 @@ production — LEX is the second real project forked from it.
   actual content (wording, dates, anything) changes; extraction is only
   ever re-run explicitly, when a linked document has changed since the last
   run.
+- **The team's own Contract Workspace Summary Template, adopted exactly**:
+  Contract detail (supplier, services, dates, value), an Executive
+  Assessment narrative plus its 8-row findings table, a Commercial/
+  Performance/Renewal Assessment table (8 more rows), Significant
+  Variations (one line per linked amendment/extension/novation), a
+  Consolidated Procurement Assessment scorecard (5 short ratings), and
+  Recommended Actions — see `python/contract_extraction.py` and
+  `assets/Contract_Workspace_Summary_Template.docx`.
 - **Citations with a highlighted original**: click "View source" next to
-  any answer and a side panel shows the exact cited passage (highlighted,
+  any finding and a side panel shows the exact cited passage (highlighted,
   always exact — built from text stored verbatim at extraction time) plus,
   for PDFs, the rendered original document with a best-effort highlight
   over the matching text.
-- **Download as PDF**: a formatted one-page-per-contract summary — overview
-  plus every standard question, its answer, confidence, and source — via
-  `st.download_button`. The team will share example templates to match a
-  house style; the current layout is a plain default, not a final design.
+- **Download as .docx**: the team's own template, filled in — same
+  headings, same tables, same styles — via `python/docx_report.py`, which
+  edits a live copy of `assets/Contract_Workspace_Summary_Template.docx`
+  rather than building a document from scratch.
 - **Contract families**: a signed contract is rarely one static document —
   its variations, extensions, and novation deeds are ingested as their own
   documents, then linked together on the Contract Register page so
@@ -74,18 +87,45 @@ CONTRACT_REGISTER  ◄───────────────────�
         │                          │
         │        contract_extraction.py: for each standard question, calls
         │        query_engine.search() scoped to the contract's linked
-        │        documents (restrict_to_doc_ids) — same retrieval/citation
-        │        engine chat would use, just with no chat UI on top
+        │        documents (restrict_to_doc_ids), then synthesizes the
+        │        Executive Assessment narrative, Recommended Actions, and
+        │        classification scorecard from the extracted fields
         ▼                          │
 CONTRACT_FIELD_EXTRACTS  ◄─────────┘
   ("History") — answer, exact cited excerpt, a verified short highlight
-  phrase, confidence, per (contract, field)
+  phrase, confidence, per (contract, field); CONTRACT_REGISTER holds the
+  three synthesized, contract-level outputs alongside it
         │
         ├─ Contract Lookup page: read straight from here, instant
         ├─ citation_viewer.py + citation_panel_ui.py: presigned stage URL +
         │  client-side PDF.js render, best-effort highlight of the phrase
-        └─ pdf_report.py: formats the same rows into a downloadable PDF
+        └─ docx_report.py: fills the team's own Contract Workspace Summary
+           Template (assets/*.docx) with the same rows, unchanged styling
 ```
+
+## The Contract Workspace Summary Template, mapped to the schema
+
+`python/contract_extraction.py`'s field list mirrors
+`assets/Contract_Workspace_Summary_Template.docx` exactly — same
+groupings, same row labels — so `docx_report.py` can drop values straight
+into the template's tables without reshuffling anything:
+
+| Template section | Fields (`CONTRACT_FIELD_EXTRACTS.FIELD_KEY`) | How it's produced |
+|---|---|---|
+| Contract detail | `SUPPLIER`, `SERVICES`, `COMMENCEMENT`, `CURRENT_EXPIRY`, `CURRENT_VALUE` | Extracted (`query_engine.search()`, cited) |
+| Executive Assessment — narrative | — | Synthesized from the extracted fields (`generate_contract_overview`) |
+| Executive Assessment — table | `NOVATION_ASSIGNMENT`, `CONFIDENTIALITY_DISCLOSURE`, `TERM_AND_EXTENSIONS`, `COMPLEXITY`, `SEPARABLE_PORTIONS`, `PAYMENT_REGIME`, `SECURITY`, `DEFECTS_LIABILITY` | Extracted, cited |
+| Significant Variations | — | Read from `CONTRACT_DOCUMENT_LINK` (non-BASE roles) + each document's own `DOCUMENT_INDEX` summary — no extra Cortex call |
+| Commercial, Performance and Renewal Assessment | `PRICE_REVIEW`, `EA_LABOUR_EXPOSURE`, `KPI_FRAMEWORK`, `COMMERCIAL_CONSEQUENCES`, `TERMINATION`, `AUTO_RENEWAL_PERPETUAL_TERM`, `CHANGE_OF_CONTROL`, `CURRENT_STATUS` | Extracted, cited |
+| Consolidated Procurement Assessment (scorecard) | `OVERALL_CLASSIFICATION`, `NOVATION_DISCLOSURE_RATING`, `COMMERCIAL_MODEL_RATING`, `OPERATIONAL_EXPOSURE_RATING`, `RENEWAL_POSITION_RATING` | Synthesized from the extracted fields — deliberately *not* independently re-searched, so it can't disagree with the detailed tables above (`generate_classification_scorecard`) |
+| Recommended Actions | — | Synthesized from the extracted fields (`generate_recommended_actions`); an empty list if nothing warrants flagging |
+
+21 extracted fields today. The template can grow — add a
+`(FIELD_KEY, question)` pair to `contract_extraction._QUESTIONS`, put the
+key in whichever `*_FIELDS` group matches where it belongs, and add its
+label to `FIELD_LABELS` — no other code changes needed, as long as the
+`.docx` template itself gains a matching row (`docx_report.py` matches
+table rows by their own label text, not position).
 
 ## Project configuration
 
@@ -128,10 +168,10 @@ them.
    (`MEDSOCMS.APP_CATALOG.GRAPH_API_NETWORK_RULE`,
    `GRAPH_API_ACCESS_INTEGRATION`) — tenant-level, shared with every other
    project-llm-wiki project on this account, not created by this repo.
-5. `fpdf2` (PDF export) resolves via PyPI on container runtime — no extra
-   setup, but note it's deliberately **not** in `environment.yml` (would
-   likely be unresolvable on warehouse runtime's Conda channel; see that
-   file's own comment).
+5. `python-docx` (the summary export) resolves via PyPI on container
+   runtime — no extra setup, but note it's deliberately **not** in
+   `environment.yml` (would likely be unresolvable on warehouse runtime's
+   Conda channel; see that file's own comment).
 
 Run `sql/test_graph_connectivity.sql` to confirm the three Graph API
 objects exist before deploying.
@@ -156,9 +196,12 @@ Snowflake Notebooks. In order, it:
 6. **Creates the `LEX_USERS` role** and grants it to named team members —
    add usernames to the notebook's `NAMED_USERS` list and re-run any time
    membership changes.
-7. **Deploys the app** — stages `python/` and `streamlit/` (flattened to
-   the stage root — see the notebook's own comments for why a nested
-   `MAIN_FILE` doesn't work), and runs `CREATE OR REPLACE STREAMLIT`.
+7. **Deploys the app** — stages `python/` (structure preserved),
+   `streamlit/` (flattened to the stage root — see the notebook's own
+   comments for why a nested `MAIN_FILE` doesn't work), **and `assets/`**
+   (structure preserved, as a sibling of `python/` — this is what
+   `docx_report.py` finds the Word template through), then runs
+   `CREATE OR REPLACE STREAMLIT`.
 8. **Schema migrations** — forward-only `ALTER TABLE ... ADD COLUMN IF NOT
    EXISTS` for a LEX project that existed before a given column did (a
    fresh provisioning run already has every column from step 4/5 above and
@@ -170,9 +213,10 @@ Open the app: Snowsight → **Streamlit** → `LEX_APP`.
 
 - **Contract Lookup** (`Chat.py` — the filename is a holdover from the
   template this was forked from; there's no chat feature) — the landing
-  page. Pick a contract number, see its overview and standard questions
-  answered from history, click **View source** on any answer to open the
-  citation panel, and **Download PDF** for a formatted summary.
+  page. Pick a contract number, see its Executive Assessment and every
+  section of the Contract Workspace Summary Template answered from
+  history, click **View source** on any finding to open the citation
+  panel, and **Download summary (.docx)** for the filled-in template.
 - **Data Sources** — three tabs: upload/sync the Required Contracts
   Register workbook; ingest contract PDFs/DOCX (upload or SharePoint,
   flagged if no signed/executed marker is found); manual index rebuild
@@ -212,22 +256,24 @@ What's actually new for LEX:
 | `LEX_CONTRACT` segmentation profile (`index_builder.py`) | Clause/schedule-aware sectioning for legal contracts |
 | Chunked indexing (`index_builder.py`) | A 100–500 page contract doesn't fit in one indexing call |
 | `query_engine.search()`'s `restrict_to_doc_ids` parameter | Scopes search to one contract's linked documents — what makes stock-field extraction just "search with the document set pre-selected" |
-| `required_contracts.py` + Required Contracts Register upload | The authoritative "which CW numbers are in scope" list, seeded from an .xlsx, independent of what's been ingested |
-| `contract_linking.py` / `contract_extraction.py` + `CONTRACT_REGISTER` / `CONTRACT_DOCUMENT_LINK` / `CONTRACT_FIELD_EXTRACTS` | Contract-family linking and the automated, persisted, cited standard-question extraction ("History") |
+| `required_contracts.py` + Required Contracts Register upload | The authoritative "which CW numbers are in scope" list, seeded (number + title) from `MTM_CONTRACT_WORKSPACES.xlsx`, independent of what's been ingested |
+| `contract_linking.py` / `contract_extraction.py` + `CONTRACT_REGISTER` / `CONTRACT_DOCUMENT_LINK` / `CONTRACT_FIELD_EXTRACTS` | Contract-family linking and the automated, persisted, cited standard-question extraction ("History"), with its field list matching the team's own template |
 | `CONTRACT_FIELD_EXTRACTS.HIGHLIGHT_PHRASE` + `contract_extraction._extract_highlight_phrase` | A short exact quote, verified as a real substring, for the citation viewer to highlight |
-| `CONTRACT_REGISTER.OVERVIEW_SUMMARY` + `contract_extraction.generate_contract_overview` | The longer-form contract overview shown on Contract Lookup and in the PDF |
+| `CONTRACT_REGISTER.OVERVIEW_SUMMARY` / `RECOMMENDED_ACTIONS` / `CLASSIFICATION_SCORECARD` | The template's Executive Assessment narrative, Recommended Actions list, and Consolidated Procurement Assessment scorecard — all synthesized from the extracted fields, not independently re-derived |
 | `citation_viewer.py` / `citation_panel_ui.py` | Presigned stage URLs + a hand-rolled client-side PDF.js viewer that best-effort highlights the cited passage in the original document |
-| `pdf_report.py` | The downloadable Contract Summary PDF (`fpdf2`) |
+| `assets/Contract_Workspace_Summary_Template.docx` + `docx_report.py` | The team's actual Word template, filled in place (structure/styles preserved) rather than a bespoke document built from scratch |
 | **Contract Lookup** page (`Chat.py`, repurposed) | The primary end-user surface — enter a contract number, get history, cite, export |
 | **Contract Register** page | Admin: linking + verification workflow |
 
 ## Known limitations / unverified in this environment
 
-Built and syntax-checked (all modules byte-compile and pass `pyflakes`;
-`pdf_report.py` was smoke-tested locally against a real `fpdf2` install,
-which caught and fixed two real bugs — `core_fonts_encoding` and
-`multi_cell`'s cursor-position default), but **not** run against a live
-Snowflake account from this environment:
+Built and syntax-checked (all modules byte-compile and pass `pyflakes`),
+and `docx_report.py` was smoke-tested locally against the real bundled
+template with `python-docx` installed — including the empty-data edge
+case (no extraction yet, no variations, no recommended actions) — which is
+what caught and fixed a real title-construction bug (duplicating the
+supplier name) before it shipped. Not run against a live Snowflake account
+from this environment, though:
 
 - The PDF.js-based citation highlighting in `citation_viewer.py` is
   genuinely best-effort (OCR text doesn't always align character-for-
@@ -245,6 +291,12 @@ Snowflake account from this environment:
   codebase already confirmed is required for `BUILD_SCOPED_FILE_URL` —
   reasoned by analogy, not independently confirmed for this specific
   function.
+- `docx_report.py` locates the template's tables/headings by matching text
+  (row labels, heading text) rather than fixed positions, and raises a
+  clear `TemplateStructureError` naming what it couldn't find if the
+  template is ever edited in a way that removes one of those markers —
+  but a *cosmetic* template edit that keeps every marker intact is
+  untested beyond the one template file bundled in `assets/`.
 
 ## Open items
 
@@ -252,14 +304,11 @@ Snowflake account from this environment:
    via Graph API (assumed throughout this repo) — a raw file share needs a
    different ingestion bridge.
 2. The 3–5 named users for the `LEX_USERS` role.
-3. The team's example question/summary template — `contract_extraction
-   .STOCK_FIELDS` currently has 15 questions; the team has said 16-20 is
-   the real target.
-4. Whatever identifies the BG/Cash securities-reconciliation list, for a
+3. Whatever identifies the BG/Cash securities-reconciliation list, for a
    future `SECURITIES_RECONCILIATION` view.
-5. The existing CW-number formatting convention, so
+4. The existing CW-number formatting convention, so
    `contract_linking.suggest_cw_number()`'s auto-suggestion is reliable.
-6. Confirmation that Cortex cross-region inference (to AWS AU) is
+5. Confirmation that Cortex cross-region inference (to AWS AU) is
    acceptable for signed contract content, from a data-handling/compliance
    standpoint.
 

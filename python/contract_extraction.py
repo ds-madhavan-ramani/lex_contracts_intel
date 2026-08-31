@@ -3,6 +3,14 @@ contract_extraction.py — automatically answer the standard questions for
 every contract and persist the results ("History") with citations that can
 be traced back to an exact passage in the original document.
 
+The field list below mirrors the team's actual Contract Workspace Summary
+Template (assets/Contract_Workspace_Summary_Template.docx) exactly — same
+groupings, same row labels — so docx_report.py can drop extracted values
+straight into that template's tables without renaming or reshuffling
+anything. See CONTRACT_DETAIL_FIELDS / EXECUTIVE_ASSESSMENT_FIELDS /
+COMMERCIAL_ASSESSMENT_FIELDS below for how the flat STOCK_FIELDS list maps
+onto the template's three tables.
+
 LEX-specific: not part of the generic project-llm-wiki template this was
 forked from. Rather than a bespoke single-shot "dump the whole contract and
 ask every question at once" prompt, each stock question is answered by
@@ -21,76 +29,145 @@ directly the rest of the time; see is_extraction_current() for how a
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from config import ProjectConfig
 import contract_linking
 from query_engine import search
-from utils.cortex_client import complete
+from utils.cortex_client import complete, complete_json
 from utils.logging_utils import get_logger, log_event
 
 logger = get_logger(__name__)
 
-# The standard questions/entities every contract gets answered for
-# automatically. FIELD_KEY is what's stored in CONTRACT_FIELD_EXTRACTS;
-# QUESTION is fed to query_engine.search() exactly as a user's own question
-# would be. Order here is the order they're extracted in and the order the
-# Contract Lookup / Contract Register pages display them in.
-#
-# 15 today — the team has 16-20 standard questions in mind and will share a
-# template with the final wording/set. Adding one is additive: append a
-# (FIELD_KEY, question) tuple here and a matching entry to FIELD_LABELS
-# below, and it's included in extraction, display, and the PDF export with
-# no other code changes.
-STOCK_FIELDS = [
-    ("CONTRACT_TITLE", "What is the contract title?"),
-    ("CW_NUMBER", "What is the CW number (contract/work order number) for this contract?"),
-    ("CONTRACT_END_DATE", "What is the contract end date (expiry date)?"),
-    ("CONTRACT_SUMMARY", "In one sentence, summarise what this contract is for."),
-    ("NOVATION_CONSENT",
-     "Does the novation clause require consent, and if so from whom? Quote the relevant clause."),
-    ("DISCLOSURE_CLAUSE", "What does the disclosure clause require or restrict?"),
-    ("EXTENSION_OPTIONS",
-     "What extension options exist under this contract — how many, for how long, and under what conditions?"),
-    ("COMPLEXITY_GOODS_SERVICES",
-     "Describe the complexity of the goods and/or services being supplied under this contract."),
-    ("SEPARABLE_PORTIONS",
-     "Does this contract identify separable portions of the work, and if so what are they?"),
-    ("PAYMENT_REGIME",
-     "What is the payment regime under this contract — is it a claims process, milestone payments, or "
-     "something else, and how does it work?"),
-    ("SECURITIES",
-     "What securities (e.g. bank guarantees, cash retention) are required under this contract, and in "
-     "what amounts?"),
-    ("PRICE_REVIEW_MECHANISM", "What price review or price escalation mechanisms does this contract include?"),
-    ("EA_CLAUSES", "What Enterprise Agreement (EA) related clauses, if any, does this contract include?"),
-    ("TERMINATION_CLAUSE",
-     "What are the termination clauses in this contract, including notice periods and any restrictions "
-     "such as perpetual-contract provisions?"),
-    ("AUTO_RENEWAL_MECHANISM",
-     "Does this contract auto-renew? If so, describe the mechanism, and state whether a change of "
-     "ownership or the auto-renewal cycle triggers a right to renegotiate the contract's terms and "
-     "conditions."),
+# ---------------------------------------------------------------------------
+# Contract detail (template table: "Contract detail" / "Current position")
+# ---------------------------------------------------------------------------
+CONTRACT_DETAIL_FIELDS = ["SUPPLIER", "SERVICES", "COMMENCEMENT", "CURRENT_EXPIRY", "CURRENT_VALUE"]
+
+# ---------------------------------------------------------------------------
+# "Executive Assessment" section's table (template: "Assessment area" /
+# "Finding and clause/reference")
+# ---------------------------------------------------------------------------
+EXECUTIVE_ASSESSMENT_FIELDS = [
+    "NOVATION_ASSIGNMENT", "CONFIDENTIALITY_DISCLOSURE", "TERM_AND_EXTENSIONS", "COMPLEXITY",
+    "SEPARABLE_PORTIONS", "PAYMENT_REGIME", "SECURITY", "DEFECTS_LIABILITY",
 ]
 
-# Human-readable label per field, for both Streamlit pages and the PDF
-# export — kept next to STOCK_FIELDS so the two never drift out of sync.
+# ---------------------------------------------------------------------------
+# "Commercial, Performance and Renewal Assessment" section's table (same
+# "Assessment area" / "Finding and clause/reference" shape, second instance)
+# ---------------------------------------------------------------------------
+COMMERCIAL_ASSESSMENT_FIELDS = [
+    "PRICE_REVIEW", "EA_LABOUR_EXPOSURE", "KPI_FRAMEWORK", "COMMERCIAL_CONSEQUENCES",
+    "TERMINATION", "AUTO_RENEWAL_PERPETUAL_TERM", "CHANGE_OF_CONTROL", "CURRENT_STATUS",
+]
+
+# The question fed to query_engine.search() for each field, exactly as a
+# user's own question would be. Order here is extraction order and display
+# order within each group above. Adding a field: append here, add its
+# label to FIELD_LABELS, and add its key to whichever *_FIELDS group above
+# matches where it belongs in the template — no other code changes needed.
+_QUESTIONS = {
+    "SUPPLIER": "Who is the supplier / contracted counterparty for this contract?",
+    "SERVICES": "In one or two sentences, what services and/or goods does this contract cover?",
+    "COMMENCEMENT": "What is the original contract date / commencement date?",
+    "CURRENT_EXPIRY": "What is the current contract expiry date?",
+    "CURRENT_VALUE": "What is the current contract value?",
+
+    "NOVATION_ASSIGNMENT":
+        "Does the novation or assignment clause require consent, and if so from whom? Cite the clause.",
+    "CONFIDENTIALITY_DISCLOSURE":
+        "What does the confidentiality/disclosure clause require or restrict? Cite the clause.",
+    "TERM_AND_EXTENSIONS":
+        "What is the contract term, and what extension options exist — how many, for how long, and under "
+        "what conditions? Cite the clause.",
+    "COMPLEXITY":
+        "Describe the complexity of the goods and/or services supplied under this contract.",
+    "SEPARABLE_PORTIONS":
+        "Does this contract identify separable portions of the work? If so, what are they?",
+    "PAYMENT_REGIME":
+        "What is the payment regime under this contract — claims process, milestone payments, or something "
+        "else — and how does it work?",
+    "SECURITY":
+        "What securities (e.g. bank guarantees, cash retention) are required under this contract, and in "
+        "what amounts?",
+    "DEFECTS_LIABILITY":
+        "What defects liability provisions does this contract include — period, scope, and remedies?",
+
+    "PRICE_REVIEW": "What price review or price escalation mechanisms does this contract include?",
+    "EA_LABOUR_EXPOSURE":
+        "What Enterprise Agreement (EA) related clauses or labour-cost exposure, if any, does this contract "
+        "include?",
+    "KPI_FRAMEWORK": "What KPI or performance-measurement framework does this contract include?",
+    "COMMERCIAL_CONSEQUENCES":
+        "What commercial consequences — e.g. liquidated damages, rebates, service credits, abatements — "
+        "apply for performance failures under this contract?",
+    "TERMINATION":
+        "What are the termination clauses in this contract, including notice periods and any restrictions "
+        "such as perpetual-contract provisions?",
+    "AUTO_RENEWAL_PERPETUAL_TERM":
+        "Does this contract auto-renew or run in perpetuity? Describe the mechanism, and state whether a "
+        "change of ownership or the auto-renewal cycle triggers a right to renegotiate the contract's terms "
+        "and conditions.",
+    "CHANGE_OF_CONTROL": "What happens under this contract if there is a change of control of either party?",
+    "CURRENT_STATUS":
+        "What is the current status of this contract (e.g. active and in force, under negotiation, in "
+        "dispute, expired)?",
+}
+
+STOCK_FIELDS = [
+    (key, _QUESTIONS[key])
+    for key in CONTRACT_DETAIL_FIELDS + EXECUTIVE_ASSESSMENT_FIELDS + COMMERCIAL_ASSESSMENT_FIELDS
+]
+
+# Human-readable label per field — copied verbatim from the template's own
+# row labels so the Streamlit pages and the generated document always
+# agree with each other and with the template's own wording.
 FIELD_LABELS = {
-    "CONTRACT_TITLE": "Contract title",
-    "CW_NUMBER": "CW number",
-    "CONTRACT_END_DATE": "Contract end date",
-    "CONTRACT_SUMMARY": "One-sentence summary",
-    "NOVATION_CONSENT": "Novation clause — consent required?",
-    "DISCLOSURE_CLAUSE": "Disclosure clause",
-    "EXTENSION_OPTIONS": "Extension options",
-    "COMPLEXITY_GOODS_SERVICES": "Complexity of goods/services",
+    "SUPPLIER": "Supplier",
+    "SERVICES": "Services",
+    "COMMENCEMENT": "Original contract / commencement",
+    "CURRENT_EXPIRY": "Current expiry",
+    "CURRENT_VALUE": "Current value",
+    "NOVATION_ASSIGNMENT": "Novation / assignment",
+    "CONFIDENTIALITY_DISCLOSURE": "Confidentiality / disclosure",
+    "TERM_AND_EXTENSIONS": "Term and extensions",
+    "COMPLEXITY": "Complexity",
     "SEPARABLE_PORTIONS": "Separable portions",
     "PAYMENT_REGIME": "Payment regime",
-    "SECURITIES": "Securities",
-    "PRICE_REVIEW_MECHANISM": "Price review mechanism",
-    "EA_CLAUSES": "EA clauses",
-    "TERMINATION_CLAUSE": "Termination clause",
-    "AUTO_RENEWAL_MECHANISM": "Auto-renewal mechanism",
+    "SECURITY": "Security",
+    "DEFECTS_LIABILITY": "Defects liability",
+    "PRICE_REVIEW": "Price review",
+    "EA_LABOUR_EXPOSURE": "EA / labour exposure",
+    "KPI_FRAMEWORK": "KPI framework",
+    "COMMERCIAL_CONSEQUENCES": "Commercial consequences",
+    "TERMINATION": "Termination",
+    "AUTO_RENEWAL_PERPETUAL_TERM": "Auto-renewal / perpetual term",
+    "CHANGE_OF_CONTROL": "Change of control",
+    "CURRENT_STATUS": "Current status",
+}
+
+# ---------------------------------------------------------------------------
+# "Consolidated Procurement Assessment" section's scorecard (template
+# table: "Category" / "Assessment") — short-form ratings SYNTHESIZED from
+# the detailed fields above (see generate_classification_scorecard), not
+# independently searched. Deliberately derived rather than re-derived from
+# raw text a second time: this table exists specifically to be a
+# consistent roll-up of the detailed findings, and independently
+# re-answering "rate the commercial model" from scratch risks disagreeing
+# with what the detailed Commercial, Performance and Renewal Assessment
+# table already said.
+# ---------------------------------------------------------------------------
+CLASSIFICATION_SCORECARD_FIELDS = [
+    "OVERALL_CLASSIFICATION", "NOVATION_DISCLOSURE_RATING", "COMMERCIAL_MODEL_RATING",
+    "OPERATIONAL_EXPOSURE_RATING", "RENEWAL_POSITION_RATING",
+]
+CLASSIFICATION_SCORECARD_LABELS = {
+    "OVERALL_CLASSIFICATION": "Overall classification",
+    "NOVATION_DISCLOSURE_RATING": "Novation / disclosure",
+    "COMMERCIAL_MODEL_RATING": "Commercial model",
+    "OPERATIONAL_EXPOSURE_RATING": "Operational exposure",
+    "RENEWAL_POSITION_RATING": "Renewal position",
 }
 
 _NOT_FOUND_MARKERS = (
@@ -137,12 +214,14 @@ EXCERPT:
 {excerpt}
 """
 
-# A model-returned "verbatim" quote is only trustworthy for highlighting
-# once actually verified against the source — models paraphrase small
-# things (capitalization, a rewritten dash, whitespace) even when
-# instructed not to. Comparing after collapsing whitespace and casing
-# catches the common near-misses without accepting a genuine paraphrase.
+
 def _normalize_for_match(text: str) -> str:
+    """A model-returned "verbatim" quote is only trustworthy for
+    highlighting once actually verified against the source — models
+    paraphrase small things (capitalization, a rewritten dash, whitespace)
+    even when instructed not to. Comparing after collapsing whitespace and
+    casing catches the common near-misses without accepting a genuine
+    paraphrase."""
     return " ".join((text or "").split()).lower()
 
 
@@ -186,8 +265,10 @@ def extract_stock_fields_for_contract(session, project: ProjectConfig, contract_
     not silently keep an old field flagged as verified once its source
     documents have changed.
 
-    Also (re)generates the contract's longer-form OVERVIEW_SUMMARY once
-    every field has been extracted — see generate_contract_overview.
+    Also (re)generates the contract's Executive Assessment narrative,
+    Recommended Actions, and classification scorecard once every field has
+    been extracted — see generate_contract_overview,
+    generate_recommended_actions, generate_classification_scorecard.
     """
     schema = project.qualified_schema
     family_doc_ids = contract_linking.get_family_doc_ids(session, project, contract_id)
@@ -235,6 +316,8 @@ def extract_stock_fields_for_contract(session, project: ProjectConfig, contract_
               not_found=sum(1 for r in results if r.confidence == "NOT_FOUND"))
 
     generate_contract_overview(session, project, contract_id)
+    generate_recommended_actions(session, project, contract_id)
+    generate_classification_scorecard(session, project, contract_id)
     return results
 
 
@@ -250,12 +333,23 @@ def extract_stock_fields_for_all_contracts(session, project: ProjectConfig) -> d
     }
 
 
-_OVERVIEW_PROMPT = """Write a short overview of this contract (4-6
-sentences) for someone who has never seen it — what it is, the parties if
-named, its scope, its term, and anything unusual worth flagging (e.g. an
-unusual termination or auto-renewal provision). Base it only on the
-information given below. Write it as plain prose, not a bulleted list, in
-a professional tone suitable for a contracts manager's briefing.
+def _answered_fields_text(session, project: ProjectConfig, contract_id: int) -> Optional[str]:
+    fields = get_contract_fields(session, project, contract_id)
+    answered = [f for f in fields if f.get("FIELD_VALUE")]
+    if not answered:
+        return None
+    return "\n\n".join(
+        f"{FIELD_LABELS.get(f['FIELD_KEY'], f['FIELD_KEY'])}: {f['FIELD_VALUE']}" for f in answered
+    )
+
+
+_OVERVIEW_PROMPT = """Write a short executive assessment of this contract
+(4-6 sentences) for a contracts manager who has never seen it — what it
+is, the parties if named, its scope, its term, and anything unusual or
+requiring attention (e.g. an unusual termination, novation, or
+auto-renewal provision; a short-dated expiry; missing information). Base
+it only on the information given below. Write it as plain prose, not a
+bulleted list, in a professional, direct tone.
 
 EXTRACTED FIELDS:
 {fields_text}
@@ -263,18 +357,15 @@ EXTRACTED FIELDS:
 
 
 def generate_contract_overview(session, project: ProjectConfig, contract_id: int) -> Optional[str]:
-    """Synthesizes CONTRACT_REGISTER.OVERVIEW_SUMMARY from this contract's
-    already-extracted stock fields — a longer-form narrative summary,
-    distinct from the one-sentence CONTRACT_SUMMARY stock field, for the
-    top of the Contract Lookup page and the downloadable PDF. Returns None
-    (and leaves OVERVIEW_SUMMARY untouched) if no fields have been
-    extracted yet — there's nothing to synthesize from."""
-    fields = get_contract_fields(session, project, contract_id)
-    answered = [f for f in fields if f.get("FIELD_VALUE")]
-    if not answered:
+    """Synthesizes CONTRACT_REGISTER.OVERVIEW_SUMMARY — the template's
+    "Executive Assessment" narrative — from this contract's already-
+    extracted stock fields. Returns None (and leaves OVERVIEW_SUMMARY
+    untouched) if no fields have been extracted yet — there's nothing to
+    synthesize from."""
+    fields_text = _answered_fields_text(session, project, contract_id)
+    if not fields_text:
         return None
 
-    fields_text = "\n\n".join(f"{f['FIELD_KEY']}: {f['FIELD_VALUE']}" for f in answered)
     overview = complete(session, project.active_model,
                         _OVERVIEW_PROMPT.format(fields_text=fields_text), max_tokens=600)
 
@@ -286,6 +377,113 @@ def generate_contract_overview(session, project: ProjectConfig, contract_id: int
         params=[overview[:4000], contract_id],
     ).collect()
     return overview
+
+
+_RECOMMENDED_ACTIONS_PROMPT = """Based on the extracted contract details
+below, list the specific actions a contracts manager should consider
+taking on this contract — e.g. confirming a consent requirement before
+any assignment, reviewing an approaching expiry or notice deadline,
+following up missing information, or flagging an unusual clause for legal
+review. Only recommend actions that are actually supported by what's
+below — if there's genuinely nothing to flag, return an empty list rather
+than inventing generic advice. Each action should be one concise sentence.
+
+EXTRACTED FIELDS:
+{fields_text}
+
+Return ONLY JSON: {{"actions": ["...", "..."]}}
+"""
+
+
+def generate_recommended_actions(session, project: ProjectConfig, contract_id: int) -> List[str]:
+    """Synthesizes CONTRACT_REGISTER.RECOMMENDED_ACTIONS — the template's
+    "Recommended Actions" bullet list — from this contract's already-
+    extracted stock fields. Returns [] (and clears RECOMMENDED_ACTIONS) if
+    no fields have been extracted yet, or the model genuinely found
+    nothing to recommend."""
+    schema = project.qualified_schema
+    fields_text = _answered_fields_text(session, project, contract_id)
+    if not fields_text:
+        session.sql(
+            f"UPDATE {schema}.CONTRACT_REGISTER SET RECOMMENDED_ACTIONS = NULL WHERE CONTRACT_ID = ?",
+            params=[contract_id],
+        ).collect()
+        return []
+
+    try:
+        result = complete_json(session, project.active_model,
+                               _RECOMMENDED_ACTIONS_PROMPT.format(fields_text=fields_text),
+                               max_tokens=800)
+        actions = [a.strip() for a in result.get("actions", []) if a and a.strip()]
+    except Exception:  # noqa: BLE001 — a synthesis step failing shouldn't fail the whole extraction run
+        logger.warning("EVENT=RECOMMENDED_ACTIONS_FAILED contract_id=%s", contract_id, exc_info=True)
+        actions = []
+
+    import json
+    session.sql(
+        f"""UPDATE {schema}.CONTRACT_REGISTER
+            SET RECOMMENDED_ACTIONS = PARSE_JSON(?), OVERVIEW_GENERATED_AT = CURRENT_TIMESTAMP()
+            WHERE CONTRACT_ID = ?""",
+        params=[json.dumps(actions), contract_id],
+    ).collect()
+    return actions
+
+
+_SCORECARD_PROMPT = """Based on the extracted contract assessment below,
+provide a short classification (3-8 words each, not a full sentence) for
+each of these five categories, consistent with what the detailed
+assessment already says — do not introduce a new judgement that
+contradicts it:
+
+- overall_classification: overall risk/complexity profile of the contract
+- novation_disclosure_rating: novation/disclosure exposure
+- commercial_model_rating: the commercial/pricing model
+- operational_exposure_rating: operational exposure (KPIs, commercial
+  consequences, defects liability)
+- renewal_position_rating: renewal/termination/auto-renewal position
+
+EXTRACTED ASSESSMENT:
+{fields_text}
+
+Return ONLY JSON: {{"overall_classification": "...", "novation_disclosure_rating": "...",
+"commercial_model_rating": "...", "operational_exposure_rating": "...", "renewal_position_rating": "..."}}
+"""
+
+
+def generate_classification_scorecard(session, project: ProjectConfig, contract_id: int) -> Dict[str, str]:
+    """Synthesizes CONTRACT_REGISTER.CLASSIFICATION_SCORECARD — the
+    template's "Consolidated Procurement Assessment" scorecard table —
+    from this contract's already-extracted stock fields. Returns {} (and
+    clears CLASSIFICATION_SCORECARD) if no fields have been extracted yet."""
+    schema = project.qualified_schema
+    fields_text = _answered_fields_text(session, project, contract_id)
+    if not fields_text:
+        session.sql(
+            f"UPDATE {schema}.CONTRACT_REGISTER SET CLASSIFICATION_SCORECARD = NULL WHERE CONTRACT_ID = ?",
+            params=[contract_id],
+        ).collect()
+        return {}
+
+    try:
+        result = complete_json(session, project.active_model,
+                               _SCORECARD_PROMPT.format(fields_text=fields_text), max_tokens=500)
+        scorecard = {
+            key.upper(): value.strip()
+            for key, value in result.items()
+            if key.upper() in CLASSIFICATION_SCORECARD_FIELDS and value and value.strip()
+        }
+    except Exception:  # noqa: BLE001 — a synthesis step failing shouldn't fail the whole extraction run
+        logger.warning("EVENT=CLASSIFICATION_SCORECARD_FAILED contract_id=%s", contract_id, exc_info=True)
+        scorecard = {}
+
+    import json
+    session.sql(
+        f"""UPDATE {schema}.CONTRACT_REGISTER
+            SET CLASSIFICATION_SCORECARD = PARSE_JSON(?)
+            WHERE CONTRACT_ID = ?""",
+        params=[json.dumps(scorecard), contract_id],
+    ).collect()
+    return scorecard
 
 
 def get_contract_fields(session, project: ProjectConfig, contract_id: int) -> List[dict]:

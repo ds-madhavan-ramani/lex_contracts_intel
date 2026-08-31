@@ -61,17 +61,25 @@ def suggest_cw_number(file_name: str, raw_text: Optional[str] = None) -> Optiona
 def get_or_create_contract(session, project: ProjectConfig, cw_number: str,
                            contract_title: Optional[str] = None) -> int:
     """Idempotent: returns the existing CONTRACT_ID for cw_number if one
-    exists, otherwise creates it. contract_title is only used on create —
-    it's editable in the Contract Register UI after that, not overwritten
-    on every call."""
+    exists, otherwise creates it. If the row already exists with no title
+    set yet and one is given now, it's backfilled once (e.g. a contract
+    auto-created by document-linking before the Required Contracts
+    Register was ever uploaded, which has no title of its own to offer) —
+    but a title the row already has is never overwritten here; editing an
+    existing title is the Contract Register UI's job, not this function's."""
     schema = project.qualified_schema
     cw_number = cw_number.strip().upper()
 
     existing = session.sql(
-        f"SELECT CONTRACT_ID FROM {schema}.CONTRACT_REGISTER WHERE CW_NUMBER = ?",
+        f"SELECT CONTRACT_ID, CONTRACT_TITLE FROM {schema}.CONTRACT_REGISTER WHERE CW_NUMBER = ?",
         params=[cw_number],
     ).collect()
     if existing:
+        if contract_title and not existing[0]["CONTRACT_TITLE"]:
+            session.sql(
+                f"UPDATE {schema}.CONTRACT_REGISTER SET CONTRACT_TITLE = ? WHERE CONTRACT_ID = ?",
+                params=[contract_title, existing[0]["CONTRACT_ID"]],
+            ).collect()
         return existing[0]["CONTRACT_ID"]
 
     session.sql(
@@ -125,17 +133,31 @@ def unlink_document(session, project: ProjectConfig, contract_id: int, doc_id: i
 
 
 def get_contract(session, project: ProjectConfig, contract_id: int) -> Optional[dict]:
-    """One contract's own register row (CW number, title, lifecycle
-    status, and the longer-form OVERVIEW_SUMMARY contract_extraction.py
-    generates) — the Contract Lookup page's header reads this directly."""
+    """One contract's own register row: CW number, title, lifecycle
+    status, the Executive Assessment narrative (OVERVIEW_SUMMARY),
+    Recommended Actions (a list, parsed from VARIANT), and the
+    classification scorecard (a dict, parsed from VARIANT) —
+    contract_extraction.py's three synthesis outputs. The Contract Lookup
+    page and docx_report.py both read this directly."""
+    import json
     schema = project.qualified_schema
     rows = session.sql(
         f"""SELECT CONTRACT_ID, CW_NUMBER, CONTRACT_TITLE, STATUS,
-                   OVERVIEW_SUMMARY, OVERVIEW_GENERATED_AT
+                   OVERVIEW_SUMMARY, OVERVIEW_GENERATED_AT,
+                   RECOMMENDED_ACTIONS, CLASSIFICATION_SCORECARD
             FROM {schema}.CONTRACT_REGISTER WHERE CONTRACT_ID = ?""",
         params=[contract_id],
     ).collect()
-    return dict(rows[0].as_dict()) if rows else None
+    if not rows:
+        return None
+    contract = dict(rows[0].as_dict())
+    contract["RECOMMENDED_ACTIONS"] = (
+        json.loads(contract["RECOMMENDED_ACTIONS"]) if contract.get("RECOMMENDED_ACTIONS") else []
+    )
+    contract["CLASSIFICATION_SCORECARD"] = (
+        json.loads(contract["CLASSIFICATION_SCORECARD"]) if contract.get("CLASSIFICATION_SCORECARD") else {}
+    )
+    return contract
 
 
 def list_contract_families(session, project: ProjectConfig) -> List[ContractSummary]:
@@ -174,6 +196,27 @@ def list_family_documents(session, project: ProjectConfig, contract_id: int) -> 
             FROM {schema}.CONTRACT_DOCUMENT_LINK CDL
             JOIN {schema}.RAW_DOCUMENTS RD ON CDL.DOC_ID = RD.DOC_ID
             WHERE CDL.CONTRACT_ID = ?
+            ORDER BY CDL.EFFECTIVE_DATE NULLS LAST, CDL.SEQUENCE_NO NULLS LAST, RD.FILE_NAME""",
+        params=[contract_id],
+    ).collect()
+    return [dict(r.as_dict()) for r in rows]
+
+
+def get_significant_variations(session, project: ProjectConfig, contract_id: int) -> List[dict]:
+    """Non-BASE linked documents (variations/extensions/novations/deeds of
+    amendment) for one contract, each with its own document-level summary
+    — the template's "Significant Variations" bullet list. Reuses each
+    document's DOCUMENT_INDEX root-node NODE_SUMMARY (already generated at
+    indexing time) rather than a separate Cortex call — indexing already
+    produces exactly the "what is this document" synopsis this list needs."""
+    schema = project.qualified_schema
+    rows = session.sql(
+        f"""SELECT CDL.DOC_ID, CDL.DOC_ROLE, CDL.EFFECTIVE_DATE, RD.FILE_NAME, RD.SOURCE_URL,
+                   DI.NODE_SUMMARY
+            FROM {schema}.CONTRACT_DOCUMENT_LINK CDL
+            JOIN {schema}.RAW_DOCUMENTS RD ON CDL.DOC_ID = RD.DOC_ID
+            LEFT JOIN {schema}.DOCUMENT_INDEX DI ON DI.DOC_ID = CDL.DOC_ID AND DI.PARENT_NODE_ID IS NULL
+            WHERE CDL.CONTRACT_ID = ? AND CDL.DOC_ROLE != 'BASE'
             ORDER BY CDL.EFFECTIVE_DATE NULLS LAST, CDL.SEQUENCE_NO NULLS LAST, RD.FILE_NAME""",
         params=[contract_id],
     ).collect()
