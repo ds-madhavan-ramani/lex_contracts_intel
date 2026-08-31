@@ -1,0 +1,564 @@
+<title>LEX Delivery Plan</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800;900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --paper:#eef1ef;
+    --paper-raised:#ffffff;
+    --ink:#121a1f;
+    --ink-dim:#4b5a61;
+    --line:#c7d1cd;
+    --steel:#33505c;
+    --steel-soft:#5c7681;
+    --amber:#b06b17;
+    --amber-bg:#f3e3cd;
+    --green:#2f6b4f;
+    --green-bg:#dceade;
+    --red:#96382a;
+    --red-bg:#f4dcd6;
+    --font-display:"Big Shoulders Display", "Arial Narrow", sans-serif;
+    --font-body:"IBM Plex Sans", "Segoe UI", sans-serif;
+    --font-mono:"IBM Plex Mono", "Consolas", monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#101718;
+      --paper-raised:#172223;
+      --ink:#e7ede9;
+      --ink-dim:#9db0aa;
+      --line:#2b3a3a;
+      --steel:#8fb4bb;
+      --steel-soft:#6f8f95;
+      --amber:#dda054;
+      --amber-bg:#3a2c17;
+      --green:#77bd97;
+      --green-bg:#193226;
+      --red:#e0917f;
+      --red-bg:#3a201b;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#101718;
+    --paper-raised:#172223;
+    --ink:#e7ede9;
+    --ink-dim:#9db0aa;
+    --line:#2b3a3a;
+    --steel:#8fb4bb;
+    --steel-soft:#6f8f95;
+    --amber:#dda054;
+    --amber-bg:#3a2c17;
+    --green:#77bd97;
+    --green-bg:#193226;
+    --red:#e0917f;
+    --red-bg:#3a201b;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--font-body);
+    font-size:16px;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3{font-family:var(--font-display); text-wrap:balance; letter-spacing:0.01em; margin:0; color:var(--ink);}
+  a{color:var(--steel);}
+  code, .mono{font-family:var(--font-mono);}
+
+  /* ---------- layout shell ---------- */
+  .shell{display:grid; grid-template-columns:220px minmax(0,1fr); max-width:1240px; margin:0 auto;}
+  @media (max-width:880px){ .shell{grid-template-columns:1fr;} .rail{display:none;} }
+
+  /* ---------- left rail nav (the "line map") ---------- */
+  .rail{
+    position:sticky; top:0; align-self:start; height:100vh;
+    padding:2.2rem 0 2rem 1.6rem;
+    border-right:1px solid var(--line);
+  }
+  .rail-title{
+    font-family:var(--font-mono); font-size:0.68rem; letter-spacing:0.14em;
+    text-transform:uppercase; color:var(--ink-dim); margin-bottom:1.4rem;
+  }
+  .rail-line{position:relative; padding-left:1.4rem; border-left:2px solid var(--line);}
+  .rail a{
+    display:block; position:relative; text-decoration:none; color:var(--ink-dim);
+    font-size:0.82rem; padding:0.5rem 0; line-height:1.25;
+  }
+  .rail a::before{
+    content:""; position:absolute; left:-1.86rem; top:0.72rem;
+    width:9px; height:9px; border-radius:50%;
+    background:var(--paper); border:2px solid var(--steel-soft);
+  }
+  .rail a:hover{color:var(--ink);}
+  .rail a:hover::before{background:var(--amber); border-color:var(--amber);}
+
+  /* ---------- main column ---------- */
+  main{padding:2.6rem clamp(1.2rem,4vw,3.4rem) 6rem;}
+  .col{max-width:68ch;}
+  section{padding-top:3.2rem; margin-top:0.2rem; border-top:1px solid transparent;}
+  section + section{border-top:1px solid var(--line);}
+  section:first-of-type{border-top:none;}
+
+  .eyebrow{
+    font-family:var(--font-mono); font-size:0.72rem; letter-spacing:0.16em;
+    text-transform:uppercase; color:var(--amber); margin-bottom:0.6rem; display:block;
+  }
+  h2{font-size:clamp(1.6rem,3vw,2.1rem); font-weight:800; margin-bottom:1rem;}
+  h3{font-size:1.05rem; font-weight:700; margin:1.6rem 0 0.6rem; color:var(--steel);}
+  p{margin:0 0 1rem; max-width:65ch;}
+  ul,ol{margin:0 0 1rem; padding-left:1.2rem;}
+  li{margin-bottom:0.4rem;}
+  strong{color:var(--ink); font-weight:600;}
+
+  /* ---------- masthead ---------- */
+  .masthead{
+    padding:3.4rem clamp(1.2rem,4vw,3.4rem) 2.6rem;
+    background:var(--paper-raised); border-bottom:3px solid var(--steel);
+  }
+  .board{
+    font-family:var(--font-mono); font-size:0.72rem; letter-spacing:0.12em;
+    text-transform:uppercase; color:var(--ink-dim); display:flex; gap:1.4rem; flex-wrap:wrap;
+    margin-bottom:1.2rem; padding-bottom:0.9rem; border-bottom:1px solid var(--line);
+  }
+  .board b{color:var(--steel); font-weight:600;}
+  .mast-title{font-size:clamp(3rem,9vw,5.4rem); font-weight:900; line-height:0.92; letter-spacing:0.01em;}
+  .mast-sub{font-size:clamp(1.05rem,2.2vw,1.35rem); color:var(--ink-dim); margin-top:0.6rem; font-weight:500; max-width:44ch;}
+  .chips{display:flex; gap:0.6rem; flex-wrap:wrap; margin-top:1.6rem;}
+  .chip{
+    font-family:var(--font-mono); font-size:0.72rem; padding:0.32rem 0.7rem;
+    border:1px solid var(--line); border-radius:999px; color:var(--ink-dim);
+  }
+
+  /* ---------- generic components ---------- */
+  .callout{
+    background:var(--paper-raised); border:1px solid var(--line); border-left:3px solid var(--steel);
+    padding:1rem 1.2rem; border-radius:2px; margin:1.2rem 0;
+  }
+  .callout p:last-child{margin-bottom:0;}
+  .callout.amber{border-left-color:var(--amber);}
+
+  table{width:100%; border-collapse:collapse; margin:1rem 0 1.6rem; font-size:0.92rem;}
+  .table-wrap{overflow-x:auto; margin:1rem 0 1.6rem;}
+  .table-wrap table{margin:0;}
+  th,td{text-align:left; padding:0.55rem 0.8rem; border-bottom:1px solid var(--line); vertical-align:top;}
+  th{font-family:var(--font-mono); font-size:0.7rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-dim); font-weight:500;}
+  td .mono{font-size:0.85rem; color:var(--steel);}
+
+  .tag{display:inline-block; font-family:var(--font-mono); font-size:0.68rem; padding:0.1rem 0.5rem; border-radius:3px; margin-right:0.3rem;}
+  .tag.new{background:var(--amber-bg); color:var(--amber);}
+  .tag.reuse{background:var(--green-bg); color:var(--green);}
+  .tag.decide{background:var(--red-bg); color:var(--red);}
+
+  figure{margin:1.6rem 0 1.8rem;}
+  figure svg{width:100%; height:auto; display:block;}
+  figcaption{font-size:0.82rem; color:var(--ink-dim); margin-top:0.6rem;}
+  .diagram-frame{border:1px solid var(--line); background:var(--paper-raised); padding:1.2rem 1rem 0.6rem; border-radius:4px;}
+
+  /* ---------- rail track timeline ---------- */
+  .track{position:relative; margin:1.6rem 0 0.5rem; padding-left:2.6rem;}
+  .track::before{content:""; position:absolute; left:0.95rem; top:0.4rem; bottom:0.4rem; width:3px; background:var(--line);}
+  .stop{position:relative; padding-bottom:2.2rem;}
+  .stop:last-child{padding-bottom:0;}
+  .stop::before{
+    content:attr(data-n); position:absolute; left:-2.6rem; top:-0.1rem;
+    width:2.1rem; height:2.1rem; border-radius:50%;
+    background:var(--paper-raised); border:2px solid var(--steel);
+    color:var(--steel); font-family:var(--font-display); font-weight:800; font-size:1.05rem;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .stop.future::before{border-color:var(--line); color:var(--ink-dim);}
+  .stop-head{display:flex; align-items:baseline; gap:0.7rem; flex-wrap:wrap; margin-bottom:0.4rem;}
+  .stop-head h3{margin:0;}
+  .stop-dur{font-family:var(--font-mono); font-size:0.74rem; color:var(--ink-dim);}
+  .stop ul{margin-bottom:0.5rem;}
+  .exit{font-size:0.86rem; color:var(--ink-dim); margin-top:0.4rem;}
+  .exit b{font-family:var(--font-mono); font-size:0.68rem; letter-spacing:0.08em; text-transform:uppercase; color:var(--green); font-weight:600;}
+
+  .foot{margin-top:4rem; padding-top:1.4rem; border-top:1px solid var(--line); font-size:0.82rem; color:var(--ink-dim);}
+</style>
+
+<div class="masthead">
+  <div class="board">
+    <span><b>Programme</b> MR5 Transition</span>
+    <span><b>Platform</b> Snowflake Cortex AI + Streamlit</span>
+    <span><b>Status</b> Proposal — build phase not yet started</span>
+  </div>
+  <div class="mast-title">LEX</div>
+  <div class="mast-sub">Legal EXtraction &amp; Contract Intelligence — a restricted-access RAG assistant over the MR5 Transition Contracts Team's Signed &amp; Executed Contracts, built on the existing project&#8209;llm&#8209;wiki engine already running in production for ORG&#8209;MM&#8209;Chat.</div>
+  <div class="chips">
+    <span class="chip">3–5 named users</span>
+    <span class="chip">8 → 600 contracts</span>
+    <span class="chip">100–500 pages each</span>
+    <span class="chip">16 stock fields, cited</span>
+    <span class="chip">Dedicated database · compute pool</span>
+  </div>
+</div>
+
+<div class="shell">
+  <nav class="rail">
+    <div class="rail-title">Contents</div>
+    <div class="rail-line">
+      <a href="#summary">Executive summary</a>
+      <a href="#scope">Objectives &amp; scope</a>
+      <a href="#approach">Solution approach</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#security">Security &amp; access</a>
+      <a href="#quality">Answer quality design</a>
+      <a href="#execution">Execution plan</a>
+      <a href="#risks">Risks &amp; mitigations</a>
+      <a href="#decisions">Decisions needed</a>
+    </div>
+  </nav>
+
+  <main>
+    <div class="col">
+
+      <section id="summary">
+        <span class="eyebrow">01 — Executive Summary</span>
+        <h2>A question-answering assistant scoped to the contract corpus</h2>
+        <p>LEX gives the MR5 Transition Contracts Team a Streamlit chatbot that, for every Signed &amp; Executed Contract, automatically answers a fixed set of 16 stock questions — contract title, CW number, end date, one-sentence summary, novation/disclosure/termination/auto-renewal clauses, payment regime, securities, price review mechanisms, and more — the moment the contract (and any of its variations, extensions, or novations) is ingested. Users can also ask free-form follow-up questions against the same corpus. Every answer is grounded in the ingested text and carries numbered citations linking back to the source document's URL; the assistant declines rather than guesses when a contract doesn't address a question.</p>
+        <p>Rather than building a new pipeline, LEX is proposed as a new <strong>project instance</strong> of <code class="mono">project-llm-wiki</code>, the reusable Snowflake Cortex engine this workspace already runs in production as <code class="mono">ORG_MM_CHAT</code>. That means most of the ingestion, retrieval, and citation machinery is proven and reused as-is; the real work is a contract-specific segmentation profile, sizing for documents up to 500 pages, a structured extraction layer that persists the 16 stock answers for every contract, contract-family linking across variations/extensions, and a tighter access boundary around a small, named user group.</p>
+        <div class="callout">
+          <p><strong>What's genuinely new:</strong> a <code class="mono">LEX_CONTRACT</code> segmentation profile tuned to clause/schedule-structured legal text, a chunked-indexing fix for 100–500 page documents (the template's default 150,000-character cap silently truncates anything past roughly 50 pages), a <code class="mono">CONTRACT_REGISTER</code> / <code class="mono">CONTRACT_FIELD_EXTRACTS</code> layer that persists the 16 stock answers with a per-field citation and a human-verify flag, and an isolated database (<code class="mono">LEXDB</code>) + dedicated compute pool (<code class="mono">LEX_COMPUTE_POOL</code>) + RBAC role restricting the app to 3–5 people.</p>
+        </div>
+      </section>
+
+      <section id="scope">
+        <span class="eyebrow">02 — Objectives &amp; Scope</span>
+        <h2>Objectives &amp; scope</h2>
+        <h3>Goals</h3>
+        <ul>
+          <li>Answer all 16 fixed stock questions automatically for every contract, the moment it and its variations/extensions are ingested.</li>
+          <li>Let users ask free-form follow-up questions about contract terms, in a concise, professional tone.</li>
+          <li>Ground every answer in retrieved text and always show numbered citations linking to the contract document's URL.</li>
+          <li>Scale from 8 contracts (Build) to roughly 600 contracts, 100–500 pages each (Scale), without a redesign.</li>
+          <li>Restrict use to the MR5 Transition Contracts Team members who need it — not a workspace-wide tool.</li>
+        </ul>
+        <h3>In scope (this phase)</h3>
+        <table>
+          <tr><td>Corpus</td><td>Signed &amp; Executed Contracts, currently accessed via a network drive the team has read permission to — see §09 for confirming whether this is a SharePoint library (assumed) or a raw file share. 8 documents for Build, scaling to ~600 for Scale, each 100–500 pages, including their variations, extensions, and novations.</td></tr>
+          <tr><td>Access</td><td>3–5 named MR5 Transition Contracts Team members.</td></tr>
+          <tr><td>Interaction</td><td>Single-turn Q&amp;A. No conversation memory — each question is answered independently of prior turns.</td></tr>
+          <tr><td>Retrieval</td><td>RAG over the ingested corpus only; no open-web or general-knowledge answers.</td></tr>
+        </table>
+        <h3>Explicitly out of scope for now</h3>
+        <ul>
+          <li>Conversation memory / follow-up context — flagged as a future enhancement (see §07, Phase 4).</li>
+          <li>Contract drafting, redlining, or version-comparison tooling.</li>
+          <li>E-signature integration or write-back to the source library.</li>
+          <li>Broader workspace rollout beyond the initial named users.</li>
+        </ul>
+        <h3>Success criteria</h3>
+        <ul>
+          <li>All 16 stock fields return correct, citation-backed answers across all 8 Build contracts, human-reviewed and verified.</li>
+          <li>A question outside a contract's coverage is declined rather than answered speculatively.</li>
+          <li>Every citation resolves to the correct document and, where feasible, the right clause within it.</li>
+          <li>Only the named 3–5 users can open the app; everyone else's access attempt fails at the Snowflake grant, not in application code.</li>
+        </ul>
+      </section>
+
+      <section id="approach">
+        <span class="eyebrow">03 — Solution Approach</span>
+        <h2>Why RAG, and why this engine</h2>
+        <p>Signed contracts are exactly the shape this engine already handles well: a bounded set of long, structured documents where an answer needs to be traceable to one clause in one document, not synthesised from fuzzy keyword hits. <code class="mono">project-llm-wiki</code>'s retrieval isn't classic chunk-and-embed RAG — it indexes each document into a navigable tree (document → section, each with an LLM-written summary) and lets the model traverse that tree the way a person would use a table of contents, falling back to keyword search and, optionally, embedding search when tree routing alone under-recalls. That combination is what contract Q&amp;A needs: individual contracts are long enough that summary-based routing keeps cost and latency sane, but dense enough — and at 600-document scale, numerous enough — that a second, semantic recall path matters from day one of the Scale phase.</p>
+        <p>What LEX needs beyond a chat engine, though, is a standing, reviewable answer to the same 16 questions for every contract — not just an on-demand Q&amp;A surface. Rather than building a second, bespoke extraction pipeline alongside the chat engine, LEX runs each of the 16 stock questions as a <strong>canned call into the same retrieval engine</strong> used for chat, scoped to one contract's document family, and persists the result. This keeps exactly one retrieval/citation/synthesis code path to maintain, and it degrades the same way chat does — "not found in the documents" rather than a hallucinated field (see §06).</p>
+        <p>Provisioning LEX as a project instance — rather than a bespoke build — means schema DDL, ingestion, indexing, tree search, reranking, caching, and citation rendering are all already written and running in production for <code class="mono">ORG_MM_CHAT</code>. Engineering effort concentrates on what's actually different about this corpus: its clause-based structure, its size per document, its multi-document contract families, and its access boundary.</p>
+      </section>
+
+      <section id="architecture">
+        <span class="eyebrow">04 — Architecture</span>
+        <h2>How a contract becomes a cited answer — twice over</h2>
+
+        <figure class="diagram-frame">
+          <svg viewBox="0 0 1200 560" role="img" aria-label="Contracts are pulled from the network drive through the Microsoft Graph API into a dedicated Snowflake database and compute pool, indexed into a clause-level document tree, and linked into a contract family alongside their variations and extensions. The same query engine that answers free-form chat questions also runs sixteen canned questions per contract family, persisting the answers with citations into a contract field extracts table that feeds the Contract Register page. All of this is served through a Streamlit app restricted by an RBAC role to three to five named users.">
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+              </marker>
+            </defs>
+            <g fill="none" stroke="currentColor" stroke-width="1.4" font-family="IBM Plex Mono, monospace">
+
+              <!-- SharePoint / network drive node -->
+              <rect x="10" y="190" width="150" height="80" rx="3"/>
+              <text x="85" y="216" text-anchor="middle" font-size="12" fill="currentColor" stroke="none">Network drive</text>
+              <text x="85" y="232" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">(SharePoint library,</text>
+              <text x="85" y="245" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">to confirm — §09)</text>
+              <text x="85" y="260" text-anchor="middle" font-size="10.5" fill="currentColor" stroke="none">8 → 600 contracts</text>
+
+              <line x1="160" y1="230" x2="212" y2="230" marker-end="url(#arrow)"/>
+              <text x="186" y="215" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">Graph API</text>
+              <text x="186" y="248" text-anchor="middle" font-size="9.5" fill="currentColor" stroke="none">Sites.Selected</text>
+
+              <!-- Security boundary -->
+              <rect x="220" y="30" width="960" height="480" rx="4" stroke-dasharray="4 4" stroke="currentColor" opacity="0.55"/>
+              <text x="240" y="52" font-size="10.5" letter-spacing="1.5" fill="currentColor" stroke="none">LEXDB DATABASE · LEX_COMPUTE_POOL</text>
+
+              <!-- RAW_DOCUMENTS -->
+              <rect x="250" y="190" width="160" height="80" rx="3"/>
+              <text x="330" y="216" text-anchor="middle" font-size="12" fill="currentColor" stroke="none">RAW_DOCUMENTS</text>
+              <text x="330" y="232" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">AI_PARSE_DOCUMENT +</text>
+              <text x="330" y="246" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">SOURCE_URL, one row</text>
+              <text x="330" y="260" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">per physical document</text>
+
+              <line x1="410" y1="230" x2="462" y2="230" marker-end="url(#arrow)"/>
+              <text x="436" y="215" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">index_builder.py</text>
+              <text x="436" y="248" text-anchor="middle" font-size="9.5" fill="currentColor" stroke="none">LEX_CONTRACT, chunked</text>
+
+              <!-- DOCUMENT_INDEX -->
+              <rect x="470" y="190" width="170" height="80" rx="3"/>
+              <text x="555" y="216" text-anchor="middle" font-size="12" fill="currentColor" stroke="none">DOCUMENT_INDEX</text>
+              <text x="555" y="232" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">clause-level tree,</text>
+              <text x="555" y="246" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">summaries + embeddings</text>
+
+              <line x1="640" y1="230" x2="692" y2="230" marker-end="url(#arrow)"/>
+              <text x="666" y="215" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">query_engine.py</text>
+              <text x="666" y="248" text-anchor="middle" font-size="9.5" fill="currentColor" stroke="none">route → hybrid search → rerank</text>
+
+              <!-- Cortex AI_COMPLETE -->
+              <rect x="700" y="80" width="160" height="64" rx="3"/>
+              <text x="780" y="106" text-anchor="middle" font-size="11.5" fill="currentColor" stroke="none">Cortex AI_COMPLETE</text>
+              <text x="780" y="122" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">synthesis + citations</text>
+              <line x1="780" y1="144" x2="780" y2="188" marker-end="url(#arrow)"/>
+
+              <!-- Query engine box (shared by chat + extraction) -->
+              <rect x="700" y="190" width="160" height="80" rx="3"/>
+              <text x="780" y="216" text-anchor="middle" font-size="12" fill="currentColor" stroke="none">Query Engine</text>
+              <text x="780" y="232" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">tree + vector +</text>
+              <text x="780" y="246" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">keyword fallback</text>
+              <text x="780" y="260" text-anchor="middle" font-size="9" fill="currentColor" stroke="none">— shared by chat + extraction —</text>
+
+              <line x1="860" y1="230" x2="912" y2="230" marker-end="url(#arrow)"/>
+              <text x="886" y="215" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">answer +</text>
+              <text x="886" y="248" text-anchor="middle" font-size="9.5" fill="currentColor" stroke="none">citations</text>
+
+              <!-- Streamlit app -->
+              <rect x="920" y="190" width="220" height="80" rx="3"/>
+              <text x="1030" y="212" text-anchor="middle" font-size="12" fill="currentColor" stroke="none">LEX_APP (Streamlit)</text>
+              <text x="1030" y="228" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">container runtime,</text>
+              <text x="1030" y="242" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">LEX_COMPUTE_POOL</text>
+              <text x="1030" y="256" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">Chat page</text>
+
+              <!-- CONTRACT_REGISTER + LINK -->
+              <rect x="250" y="320" width="160" height="80" rx="3"/>
+              <text x="330" y="346" text-anchor="middle" font-size="11.5" fill="currentColor" stroke="none">CONTRACT_REGISTER</text>
+              <text x="330" y="362" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">+ DOCUMENT_LINK</text>
+              <text x="330" y="378" text-anchor="middle" font-size="9.5" fill="currentColor" stroke="none">base/variation/extension</text>
+              <text x="330" y="392" text-anchor="middle" font-size="9.5" fill="currentColor" stroke="none">family, one row per CW number</text>
+
+              <line x1="330" y1="270" x2="330" y2="316" marker-end="url(#arrow)"/>
+
+              <line x1="410" y1="360" x2="462" y2="360" marker-end="url(#arrow)"/>
+              <text x="436" y="345" text-anchor="middle" font-size="9" fill="currentColor" stroke="none">family doc_ids</text>
+
+              <!-- CONTRACT_FIELD_EXTRACTS -->
+              <rect x="470" y="320" width="170" height="80" rx="3"/>
+              <text x="555" y="346" text-anchor="middle" font-size="11.5" fill="currentColor" stroke="none">CONTRACT_FIELD_EXTRACTS</text>
+              <text x="555" y="362" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">16 fields, one row each,</text>
+              <text x="555" y="378" text-anchor="middle" font-size="9.5" fill="currentColor" stroke="none">citation + confidence +</text>
+              <text x="555" y="392" text-anchor="middle" font-size="9.5" fill="currentColor" stroke="none">human-verify flag</text>
+
+              <path d="M 640 350 L 780 350 L 780 274" marker-end="url(#arrow)"/>
+              <text x="710" y="335" text-anchor="middle" font-size="9" fill="currentColor" stroke="none">16 canned questions,</text>
+              <text x="710" y="308" text-anchor="middle" font-size="9" fill="currentColor" stroke="none">reuses search()</text>
+
+              <line x1="640" y1="360" x2="912" y2="360" marker-end="url(#arrow)"/>
+              <text x="780" y="345" text-anchor="middle" font-size="9" fill="currentColor" stroke="none">16 fields + citation + confidence</text>
+
+              <!-- Contract Register page -->
+              <rect x="920" y="320" width="220" height="80" rx="3"/>
+              <text x="1030" y="346" text-anchor="middle" font-size="12" fill="currentColor" stroke="none">Contract Register</text>
+              <text x="1030" y="362" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">Streamlit page —</text>
+              <text x="1030" y="376" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">review + verify each field</text>
+
+              <!-- RBAC bracket down to users, routed via right margin channel -->
+              <path d="M 1140 230 L 1164 230 L 1164 480 L 1134 480" marker-end="url(#arrow)"/>
+              <text x="1172" y="360" font-size="9.5" fill="currentColor" stroke="none" transform="rotate(90 1172 360)">USAGE grant</text>
+            </g>
+
+            <!-- Users node (real color accent) -->
+            <g font-family="IBM Plex Mono, monospace">
+              <rect x="930" y="450" width="200" height="60" rx="3" fill="none" stroke="#b06b17" stroke-width="1.6"/>
+              <text x="1030" y="474" text-anchor="middle" font-size="12" fill="#b06b17">3–5 named users</text>
+              <text x="1030" y="490" text-anchor="middle" font-size="10" fill="#b06b17">MR5 Transition Contracts Team</text>
+            </g>
+
+            <!-- Citation loop back to network drive -->
+            <path d="M 1030 190 C 1030 20, 85 20, 85 188" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="3 4" marker-end="url(#arrow)" opacity="0.7"/>
+            <text x="555" y="16" text-anchor="middle" font-size="10" fill="currentColor" font-family="IBM Plex Mono, monospace">citation links resolve back to the original contract document</text>
+          </svg>
+          <figcaption>Two paths share one engine: the top row is free-form chat (network drive → parse → index → query engine → synthesis → Streamlit); the second row is the 16-field extraction pipeline, which calls the same query engine per contract family and persists the results — with citation and confidence — into the Contract Register rather than answering live each time.</figcaption>
+        </figure>
+
+        <h3>Component notes</h3>
+        <table>
+          <tr><td class="mono">RAW_DOCUMENTS</td><td>One row per physical document — the base contract and each of its variations, extensions, and novation deeds are separate rows. Parsed text, SHA-256 hash for idempotent re-ingestion, and <code class="mono">SOURCE_URL</code> — this is what makes every citation clickable. PDFs/DOCX go through <code class="mono">AI_PARSE_DOCUMENT</code> OCR.</td></tr>
+          <tr><td class="mono">DOCUMENT_INDEX</td><td>A tree, not a flat chunk store: a root node per document, section nodes underneath with an LLM-written summary each. A <code class="mono">NODE_EMBEDDING VECTOR(FLOAT,768)</code> column holds a semantic embedding per section — needed at 600-document scale, where document-summary routing alone is too coarse.</td></tr>
+          <tr><td class="mono">CONTRACT_REGISTER + LINK</td><td><strong>New tables.</strong> One row per real-world contract (keyed on CW number), with a join table recording which physical documents belong to it and in what role — base, variation, extension, or novation — so free-form Q&amp;A and the extraction job both route across a contract's full history, not just its base document.</td></tr>
+          <tr><td class="mono">CONTRACT_FIELD_EXTRACTS</td><td><strong>New table.</strong> One row per (contract, stock field) — the persisted, citable answer to each of the 16 questions, re-resolved whenever a new document lands in a contract's family, with a <code class="mono">CONFIDENCE</code> rating and an <code class="mono">IS_VERIFIED</code> human sign-off flag.</td></tr>
+          <tr><td class="mono">query_engine.py</td><td>Three signals feed the section candidate pool: document/section summary routing, a literal keyword fallback for clause numbers and defined terms a summary might not capture verbatim, and (when enabled) embedding similarity search. An LLM reranker narrows the pool before a final synthesis call writes the answer with numbered, deterministic citations — used identically by chat and by the extraction job, scoped by an added <code class="mono">restrict_to_doc_ids</code> parameter for the latter.</td></tr>
+          <tr><td class="mono">LEX_APP</td><td>The Streamlit front end — the existing <code class="mono">Chat.py</code> / Data Sources / Sync Status pattern from <code class="mono">ORG_MM_CHAT</code>, plus a new Contract Register page, deployed as its own Streamlit object on a dedicated compute pool, gated by a dedicated RBAC role.</td></tr>
+        </table>
+
+        <h3>Proposed catalog configuration</h3>
+        <p>The catalog bookkeeping still lives in a single row in <code class="mono">MEDSOCMS.APP_CATALOG.PROJECTS</code> — that part of the provisioning notebook is unchanged. A <code class="mono">DATA_DATABASE</code> field, and giving <code class="mono">CREATE_PROJECT</code> the ability to target it, don't exist in the template yet — the same gap flagged in the FRANK plan, and worth implementing once for both projects rather than twice.</p>
+        <div class="table-wrap">
+        <table>
+          <tr><th>Setting</th><th>Proposed value</th><th>Rationale</th></tr>
+          <tr><td class="mono">PROJECT_CODE</td><td class="mono">LEX</td><td>—</td></tr>
+          <tr><td class="mono">DATA_DATABASE</td><td class="mono">LEXDB <span class="tag decide">confirm</span></td><td><strong>New template field</strong> — dedicated database, to be created (<code class="mono">SYSADMIN</code>), same pattern as FRANK's <code class="mono">MEDSGOV</code></td></tr>
+          <tr><td class="mono">DATA_SCHEMA</td><td class="mono">DATA_LEX</td><td>Isolated tables/stage inside <code class="mono">LEXDB</code>, per the template's existing per-project pattern</td></tr>
+          <tr><td class="mono">COMPUTE_POOL</td><td class="mono">LEX_COMPUTE_POOL <span class="tag decide">confirm</span></td><td>Dedicated, not shared — to be created (<code class="mono">SYSADMIN</code>); size against Build-phase OCR/indexing throughput before committing a tier</td></tr>
+          <tr><td class="mono">QUERY_WAREHOUSE</td><td class="mono">MTMWH02 <span class="tag decide">build only</span></td><td>Temporary for build/UAT; swap to a production warehouse before go-live</td></tr>
+          <tr><td class="mono">SEGMENTATION_PROFILE</td><td class="mono">LEX_CONTRACT</td><td><strong>New</strong> — see §06</td></tr>
+          <tr><td class="mono">SEGMENTATION_GRANULARITY</td><td class="mono">DETAILED</td><td>One section per clause/schedule rather than per whole contract, needed for precise citation at this document length</td></tr>
+          <tr><td class="mono">ENABLE_VECTOR_SEARCH</td><td class="mono">TRUE</td><td>Second recall path — mandatory once Scale phase reaches ~600 documents, where summary-only routing is too coarse</td></tr>
+          <tr><td class="mono">ENABLE_RERANKING</td><td class="mono">TRUE</td><td>Keeps synthesis focused when hybrid retrieval returns a wider pool</td></tr>
+          <tr><td class="mono">MAX_DOCUMENT_CHARS</td><td class="mono">1,200,000 <span class="tag new">interim</span></td><td>A 500-page contract runs well past a million characters; even this raised ceiling is a stopgap — the real fix is the chunked-indexing rework in §07 Phase 2, not a bigger single-shot LLM call</td></tr>
+          <tr><td class="mono">MAX_SECTION_CHARS</td><td class="mono">8,000 (unchanged)</td><td>Fine as-is at DETAILED granularity, where sections are clause-sized</td></tr>
+          <tr><td class="mono">MAX_CANDIDATE_DOCS</td><td class="mono">10 (clamped max)</td><td>Most questions are per-contract, but a family with several variations/extensions benefits from the wider end of the allowed [5,10] range</td></tr>
+          <tr><td class="mono">SHAREPOINT_SITE_URL / FOLDER</td><td class="mono tag decide">to confirm</td><td>Depends on §09's answer to whether the "network drive" is a SharePoint library — needed before ingestion can be built</td></tr>
+        </table>
+        </div>
+      </section>
+
+      <section id="security">
+        <span class="eyebrow">05 — Security &amp; Access</span>
+        <h2>A boundary the platform enforces, not the app</h2>
+        <p>Access control is deliberately kept out of application code — <code class="mono">Chat.py</code> has no login screen or user table, and it should stay that way. Restriction happens at the Snowflake grant, the same mechanism that already protects every other object in this workspace:</p>
+        <ul>
+          <li>A new role, <code class="mono">LEX_USERS</code>, holds <code class="mono">USAGE</code> on the <code class="mono">LEX_APP</code> Streamlit object and its compute pool — nothing else. It is granted only to the 3–5 named MR5 Transition Contracts Team accounts.</li>
+          <li>The underlying <code class="mono">DATA_LEX</code> schema and tables stay owned by <code class="mono">ADVANCEDANALYTICS</code>, the same service role every project in this catalog runs as — end users never get direct table access, only the app's query path.</li>
+          <li>A dedicated Graph API app registration's <code class="mono">Sites.Selected</code> grant is scoped to just the contracts library, not the whole tenant, and not shared with <code class="mono">ORG_MM_CHAT</code>'s own registration — revoking LEX's access later shouldn't touch other projects.</li>
+        </ul>
+        <div class="callout amber">
+          <p><strong>Recommended: a fully separate database.</strong> <code class="mono">LEXDB</code> and <code class="mono">LEX_COMPUTE_POOL</code>, following the same precedent already set for FRANK's <code class="mono">MEDSGOV</code> / <code class="mono">STREAMLIT_COMPUTE_POOL_OCMS_GOVERNANCE</code> in this workspace — neither exists yet for LEX and both need <code class="mono">SYSADMIN</code> to create. The template's shared catalog bookkeeping (<code class="mono">MEDSOCMS.APP_CATALOG.PROJECTS</code>) still centralizes which projects exist and their settings; only LEX's actual data (schema, tables, stage) moves into <code class="mono">LEXDB</code>. That split needs the same <code class="mono">DATA_DATABASE</code> template extension FRANK's plan already scoped — implement it once, both projects benefit (see §07 Phase 1).</p>
+        </div>
+      </section>
+
+      <section id="quality">
+        <span class="eyebrow">06 — Answer Quality Design</span>
+        <h2>Concise, cited, and willing to say no</h2>
+        <h3>Tone &amp; length</h3>
+        <p>The synthesis prompt (the same call that already numbers citations deterministically and normalises stray formatting artefacts in <code class="mono">ORG_MM_CHAT</code>) will be adjusted for LEX to favour a short, direct answer — lead with the answer, follow with the supporting clause language, and stop — written as if briefing a contracts manager, not restating the source text exhaustively.</p>
+        <h3>Citations</h3>
+        <p>Every answer's <code class="mono">SOURCE_URL</code>-backed citation list is already numbered and clickable in the existing engine — reused unchanged. Where a contract is long enough that "the whole document" isn't a useful citation, <code class="mono">DETAILED</code> segmentation (one section per clause/schedule) is what keeps a citation pointing at the actual clause rather than a 500-page PDF.</p>
+        <h3>A new segmentation profile: <code class="mono">LEX_CONTRACT</code></h3>
+        <p>The existing <code class="mono">ORG_MEETING_MINUTES</code> profile is written for minutes. Contracts need a profile written for clause-structured legal text instead: segment by clause/sub-clause/schedule/annexure, quote defined terms, clause numbers, dollar figures, and dates verbatim rather than paraphrasing them (routing accuracy depends on it, exactly as the existing README notes for meeting codes), and flag cross-references to a contract's own variations or extensions where the text makes them. This is a new entry in <code class="mono">index_builder.py</code>'s <code class="mono">PROMPTS</code> dict plus a matching <code class="mono">SEGMENTATION_PROFILE</code> catalog value — additive, no changes to the calling code.</p>
+        <h3>The 16 stock questions: canned queries, not a bespoke prompt</h3>
+        <p>Each stock field is generated by calling <code class="mono">query_engine.search()</code> — the same function chat uses — once per question, scoped to a contract's full document family via the new <code class="mono">restrict_to_doc_ids</code> parameter. The result (answer, source document, source clause, verbatim quote) is upserted into <code class="mono">CONTRACT_FIELD_EXTRACTS</code>. This runs automatically when a family is first fully ingested, again whenever a new document lands in an existing family, and on demand from the Contract Register page. For 8 contracts this is instant; at 600 contracts it moves to a scheduled Snowflake Task rather than an inline Streamlit action.</p>
+        <p>Legal accuracy stakes make an unreviewed LLM answer risky to rely on as-is: every field shows its citation and a <code class="mono">CONFIDENCE</code> badge, and a reviewer marks <code class="mono">IS_VERIFIED</code> before the team relies on it. "Not found in the documents" is an explicit, valid answer — never a guess.</p>
+        <h3>No memory, by design — for now</h3>
+        <p>Each question is answered independently; there is no chat history fed back into retrieval or synthesis. This matches what the team asked for and keeps every answer's provenance unambiguous. Multi-turn memory is scoped as a future enhancement once the single-turn experience is validated — see §07, Phase 4.</p>
+      </section>
+
+      <section id="execution">
+        <span class="eyebrow">07 — Execution Plan</span>
+        <h2>From provisioning to go-live</h2>
+        <div class="track">
+
+          <div class="stop" data-n="0">
+            <div class="stop-head"><h3>Discovery &amp; access</h3><span class="stop-dur">~1 week</span></div>
+            <ul>
+              <li>Confirm whether the "network drive" is a SharePoint library reachable via Graph API (assumed) or a raw file share needing a different ingestion bridge (§09).</li>
+              <li>Confirm the final 8 Build-phase contracts and flag any that are scanned images (heavier OCR) versus native PDF/DOCX text, and any that already have variations/extensions on file.</li>
+              <li>Identify the 3–5 named users and confirm their Snowflake logins exist.</li>
+              <li>Request <code class="mono">Sites.Selected</code> consent for the contracts library under a new, dedicated Graph API app registration.</li>
+            </ul>
+            <p class="exit"><b>Exit</b> Source confirmed, document list, and user list signed off by the MR5 Transition Contracts Team.</p>
+          </div>
+
+          <div class="stop" data-n="1">
+            <div class="stop-head"><h3>Provisioning</h3><span class="stop-dur">~3–5 days</span></div>
+            <ul>
+              <li><span class="tag new">New</span> Extend the template to support a per-project database, not just a per-project schema: add a <code class="mono">DATA_DATABASE</code> column to <code class="mono">PROJECTS</code>, thread it through <code class="mono">config.py</code>'s <code class="mono">ProjectConfig.qualified_schema</code>/<code class="mono">qualified_stage</code>, and add a target-database parameter to the <code class="mono">CREATE_PROJECT</code> procedure — it currently hardcodes <code class="mono">MEDSOCMS</code> as the one shared database.</li>
+              <li>Create <code class="mono">LEXDB</code> and <code class="mono">LEX_COMPUTE_POOL</code> under <code class="mono">SYSADMIN</code>.</li>
+              <li>Run the extended <code class="mono">CREATE_PROJECT('LEX', ...)</code> to create <code class="mono">LEXDB.DATA_LEX</code>, its stage, and the catalog row in <code class="mono">MEDSOCMS.APP_CATALOG.PROJECTS</code>.</li>
+              <li>Confirm <code class="mono">USAGE</code>/<code class="mono">MONITOR</code> on the compute pool and the shared PyPI access integration for container runtime.</li>
+              <li>Create the <code class="mono">LEX_USERS</code> end-user role and grant it to the named accounts once the app is deployed.</li>
+            </ul>
+            <p class="exit"><b>Exit</b> <code class="mono">LEXDB.DATA_LEX</code> schema exists via the extended <code class="mono">CREATE_PROJECT</code>; <code class="mono">LEX_USERS</code> role granted to exactly the named users.</p>
+          </div>
+
+          <div class="stop" data-n="2">
+            <div class="stop-head"><h3>Segmentation profile, chunked indexing &amp; ingestion</h3><span class="stop-dur">~1–2 weeks</span></div>
+            <ul>
+              <li>Write and test the <code class="mono">LEX_CONTRACT</code> prompt in <code class="mono">index_builder.py</code> against 2–3 representative Build-phase contracts before running it across all 8.</li>
+              <li><span class="tag new">New</span> Implement chunked indexing for documents beyond the current single-call limit (page-boundary chunking via <code class="mono">AI_PARSE_DOCUMENT</code>, multiple chunks' sections attaching under one document root) — required before any 100+ page contract can be validated correctly, not a Scale-phase-only concern.</li>
+              <li>Ingest and index the 8 Build contracts, plus any variations/extensions, via the Data Sources page; spot-check that <code class="mono">SOURCE_URL</code> populates correctly.</li>
+            </ul>
+            <p class="exit"><b>Exit</b> All 8 contracts (and known variations) ingested and fully indexed — no content silently dropped past a character limit.</p>
+          </div>
+
+          <div class="stop" data-n="3">
+            <div class="stop-head"><h3>Contract-family linking &amp; stock-field extraction</h3><span class="stop-dur">~1 week</span></div>
+            <ul>
+              <li><span class="tag new">New</span> Build the <code class="mono">CONTRACT_REGISTER</code> / <code class="mono">CONTRACT_DOCUMENT_LINK</code> / <code class="mono">CONTRACT_FIELD_EXTRACTS</code> tables and link each Build contract's documents into its family (auto-suggested by CW number, user-confirmed).</li>
+              <li><span class="tag new">New</span> Add the <code class="mono">restrict_to_doc_ids</code> parameter to <code class="mono">query_engine.search()</code> and build the Contract Register Streamlit page.</li>
+              <li>Run the 16-field extraction job across all 8 contracts; human-review every field — small volume makes full review feasible and sets the accuracy baseline.</li>
+            </ul>
+            <p class="exit"><b>Exit</b> All 16 fields populated and verified for all 8 Build contracts.</p>
+          </div>
+
+          <div class="stop future" data-n="4">
+            <div class="stop-head"><h3>Validation, UAT &amp; sign-off</h3><span class="stop-dur">~1–2 weeks</span></div>
+            <ul>
+              <li>Team reviews accuracy of all 16 fields across all 8 contracts, plus a test set of free-form questions — including questions the corpus should decline to answer.</li>
+              <li>Confirm citation correctness against the actual clause, not just the right document.</li>
+              <li>Go/no-go decision to proceed to Scale.</li>
+            </ul>
+            <p class="exit"><b>Exit</b> Team sign-off to scale.</p>
+          </div>
+
+          <div class="stop future" data-n="5">
+            <div class="stop-head"><h3>Scale to ~600 contracts</h3><span class="stop-dur">ongoing</span></div>
+            <ul>
+              <li>Bulk ingestion, batched rather than all at once — watch OCR/Cortex throughput and cost.</li>
+              <li>Move the extraction job to a scheduled Snowflake Task; spot-review a statistically meaningful sample rather than every field of every contract.</li>
+              <li>Cut over from build-time to production state: swap <code class="mono">QUERY_WAREHOUSE</code> from <code class="mono">MTMWH02</code> to a production warehouse.</li>
+              <li><strong>Future:</strong> conversation memory, once the single-turn experience is validated; a securities-reconciliation view against the BG/Cash list once it's identified (§09); broader access if the team grows.</li>
+            </ul>
+          </div>
+
+        </div>
+      </section>
+
+      <section id="risks">
+        <span class="eyebrow">08 — Risks &amp; Mitigations</span>
+        <h2>What could go wrong, and the fallback</h2>
+        <div class="table-wrap">
+        <table>
+          <tr><th>Risk</th><th>Mitigation</th></tr>
+          <tr><td>A 500-page contract is silently under-indexed by the default single-call indexing pass</td><td>Chunked indexing is a named Phase 2 exit task, not deferred to Scale — validated against the largest of the 8 Build contracts before sign-off.</td></tr>
+          <tr><td>Contract-family auto-linking merges two unrelated contracts that happen to share a CW-number format</td><td>Auto-link is suggestion-only; always user-confirmable in the Contract Register UI before it affects extraction routing.</td></tr>
+          <tr><td>The model answers confidently from a paraphrase rather than the actual clause wording — a real risk in legal text</td><td>Reused keyword-fallback + citation-numbering machinery keeps answers traceable to source; every stock field carries a verbatim quote and a human-verify gate before the team relies on it.</td></tr>
+          <tr><td>Cost/throughput at 600 × 500-page OCR and indexing runs</td><td>Batch ingestion, chunked indexing, and Build-phase throughput measurement before committing a Scale-phase timeline.</td></tr>
+          <tr><td>Cross-region Cortex inference and contract sensitivity</td><td>One-line confirmation from Snowflake/compliance before Build phase runs real signed contracts through it (§09).</td></tr>
+          <tr><td>The source turns out to be a raw file share, not SharePoint</td><td>Confirmed in Phase 0 before ingestion design is locked in — a different bridge (e.g. a scheduled agent staging files via <code class="mono">PUT</code>) is needed if so.</td></tr>
+          <tr><td>A shared compute pool elsewhere in the workspace hits <code class="mono">max_nodes</code> and blocks startup (has happened before in this catalog)</td><td>Not applicable — LEX gets its own dedicated pool specifically to avoid this class of failure.</td></tr>
+          <tr><td>The <code class="mono">DATA_DATABASE</code> template extension is built as a one-off hack for a single project</td><td>Scoped as reusable engineering (§07 Phase 1) — the same gap FRANK's plan already identified, fixed once for both.</td></tr>
+        </table>
+        </div>
+      </section>
+
+      <section id="decisions">
+        <span class="eyebrow">09 — Open Decisions</span>
+        <h2>Calls made in this plan, for the team to confirm or override</h2>
+        <ul>
+          <li><span class="tag decide">Confirm</span> The "network drive" is a SharePoint library reachable via Graph API, as assumed throughout this plan — if it's a raw file share instead, the ingestion design in §04 changes.</li>
+          <li><span class="tag decide">Confirm</span> The 3–5 named users, so <code class="mono">LEX_USERS</code> can be granted correctly at provisioning time.</li>
+          <li><span class="tag decide">Confirm</span> A fully separate database (<code class="mono">LEXDB</code>) and dedicated compute pool, following FRANK's precedent — who requests their creation under <code class="mono">SYSADMIN</code>, and their final names.</li>
+          <li><span class="tag decide">Confirm</span> The production warehouse to cut over to at go-live — building on <code class="mono">MTMWH02</code> in the meantime.</li>
+          <li><span class="tag decide">Confirm</span> What identifies the BG/Cash list ("Maureen's list") for the future securities-reconciliation view — file name and location.</li>
+          <li><span class="tag decide">Confirm</span> The existing CW-number formatting convention, to make contract-family auto-linking reliable.</li>
+          <li><span class="tag decide">Confirm</span> Cortex cross-region inference to AWS AU is acceptable for signed contract content, from a data-handling/compliance standpoint.</li>
+          <li><span class="tag decide">Confirm</span> <code class="mono">ACTIVE_MODEL</code> — this plan assumes the catalog default unless the team wants a stronger reasoning model for legal synthesis specifically, subject to what's available via Cortex in this account/region.</li>
+        </ul>
+      </section>
+
+      <div class="foot">
+        Prepared for the MR5 Transition Contracts Team · builds on the <code class="mono">project-llm-wiki</code> engine running in production as <code class="mono">ORG_MM_CHAT</code> · relevant code (currently in <code class="mono">ds-madhavan-ramani/org_mm_chat</code>, to be copied into this repo per §07 Phase 1): <code class="mono">sql/00_setup_catalog.sql</code>, <code class="mono">python/ingestion/index_builder.py</code>, <code class="mono">python/query_engine.py</code>, <code class="mono">python/provisioning/create_project.py</code>.
+      </div>
+
+    </div>
+  </main>
+</div>
