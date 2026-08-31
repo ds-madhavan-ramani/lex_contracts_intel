@@ -2,7 +2,7 @@
 query_engine.py — tree-search + answer synthesis, generalized to run against
 any project's schema.
 
-Forked from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat).
+Forked from the project-llm-wiki template.
 Difference from that template: search() takes an optional
 restrict_to_doc_ids parameter. When given, Stage 1's document-summary
 routing (and its keyword-fallback) is skipped entirely — the caller has

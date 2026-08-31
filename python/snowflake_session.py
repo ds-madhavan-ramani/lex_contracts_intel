@@ -1,7 +1,7 @@
 """
 snowflake_session.py — single place that produces a Snowpark Session.
 
-Unchanged from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat).
+Unchanged from the project-llm-wiki template.
 Tries, in order:
   1. get_active_session() — works in Snowflake Notebooks and warehouse-runtime
      Streamlit apps, but is NOT supported in container runtime.

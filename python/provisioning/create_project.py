@@ -2,7 +2,7 @@
 provisioning/create_project.py — thin CLI wrapper around the CREATE_PROJECT
 stored procedure (sql/00_setup_catalog.sql). Used by the setup notebook.
 
-Forked from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat);
+Forked from the project-llm-wiki template;
 adds --data-database (default MEDSOCMS) since a project's data can now live
 in its own database, not just its own schema.
 

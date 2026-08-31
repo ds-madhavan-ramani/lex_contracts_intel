@@ -3,7 +3,7 @@ sql_script.py — split a multi-statement .sql file into individual statements
 without breaking on semicolons that appear inside comments, string literals,
 or $$ ... $$ stored-procedure bodies.
 
-Unchanged from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat).
+Unchanged from the project-llm-wiki template.
 Why this exists: a plain `text.split(';')` truncates any statement that
 happens to contain a ';' inside a `--` comment or a dollar-quoted proc body —
 exactly the shape of file this template ships (CREATE_PROJECT / TEARDOWN_

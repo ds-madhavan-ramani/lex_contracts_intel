@@ -1,7 +1,7 @@
 """
 cortex_client.py — thin wrapper around SNOWFLAKE.CORTEX.COMPLETE / AI_COMPLETE.
 
-Unchanged from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat).
+Unchanged from the project-llm-wiki template.
 Model is passed in per call (from ProjectConfig.active_model) rather than
 read from a module-level ACTIVE_MODEL constant, so two projects running in
 the same process can use different models.

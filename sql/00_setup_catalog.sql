@@ -2,7 +2,7 @@
 -- LEX : 00_setup_catalog.sql
 -- One-time setup. Creates the central catalog schema shared across every
 -- llm-wiki-style project on this account — including projects from OTHER
--- repos (e.g. ORG_MM_CHAT in ds-madhavan-ramani/org_mm_chat). Safe to
+-- other repos built from the same project-llm-wiki template. Safe to
 -- re-run: every statement is CREATE ... IF NOT EXISTS.
 --
 -- Infra values carried over unchanged from project-llm-wiki:
@@ -10,7 +10,7 @@
 --   Catalog   : MEDSOCMS.APP_CATALOG (shared, database is always MEDSOCMS)
 --   Role      : ADVANCEDANALYTICS
 --
--- LEX-specific difference from the org_mm_chat template this was forked
+-- LEX-specific difference from the project-llm-wiki template this was forked
 -- from: a project's actual DATA_SCHEMA can now live in its own DATABASE
 -- (DATA_DATABASE), not just its own schema inside the shared MEDSOCMS
 -- database. LEX uses this to get MEDSCOMA as a fully isolated database. The
@@ -209,7 +209,7 @@ def run(session, project_code, project_name, description,
     # 2. Create its tables + stage (mirrors 02_project_schema_template.sql).
     #    NODE_SUMMARY is VARCHAR(8000) and NODE_EMBEDDING/SOURCE_URL are
     #    present from the start — these were later migrations on the
-    #    original org_mm_chat template's already-existing project, but this
+    #    template's already-existing reference project, but this
     #    is a fresh project so there's no earlier shape to migrate from.
     ddl_statements = [
         f"""CREATE STAGE IF NOT EXISTS {data_database}.{data_schema}.{stage_name}

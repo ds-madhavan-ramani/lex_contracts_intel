@@ -2,7 +2,7 @@
 pages/2_Sync_Status.py — ingestion/index counts, required-contracts
 coverage, and recent run history.
 
-Forked from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat).
+Forked from the project-llm-wiki template.
 Difference from that template: adds the required-contracts coverage
 section — LEX's unit of progress is "how many of the required CW numbers
 are fully extracted", not just raw document/index counts.

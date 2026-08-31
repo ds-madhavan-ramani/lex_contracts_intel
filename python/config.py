@@ -1,13 +1,13 @@
 """
 config.py — infra constants + per-project config loader.
 
-Forked from the project-llm-wiki template running in production as
-ORG_MM_CHAT (ds-madhavan-ramani/org_mm_chat). A project's settings are a
+Forked from the project-llm-wiki template, which also runs other projects
+in production on this account. A project's settings are a
 row in MEDSOCMS.APP_CATALOG.PROJECTS, fetched at runtime — only true infra
 constants (shared across every project on this account) stay as
 module-level constants here.
 
-Difference from the org_mm_chat template this was forked from: a project's
+Difference from the project-llm-wiki template this was forked from: a project's
 actual data can now live in its own DATABASE (ProjectConfig.data_database),
 not just its own schema inside the shared MEDSOCMS database — LEX uses
 this to get MEDSCOMA as a fully isolated database. The shared catalog

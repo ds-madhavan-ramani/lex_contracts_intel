@@ -2,7 +2,7 @@
 xlsx_parser.py — native XLSX parsing for spreadsheet-sourced documents (e.g.
 a securities/BG-and-cash register), bypassing AI_PARSE_DOCUMENT.
 
-Unchanged from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat).
+Unchanged from the project-llm-wiki template.
 AI_PARSE_DOCUMENT is OCR/layout-oriented and not built for tabular data — a
 register's rows are structured data, not a scanned page, so read them
 directly.
