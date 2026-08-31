@@ -6,7 +6,7 @@
 -- per-project table shape is reviewable/diffable outside the stored proc,
 -- and as a fallback if you need to create a project's schema manually.
 --
--- Replace {{DATA_DATABASE}} (e.g. LEXDB) and {{DATA_SCHEMA}} (e.g.
+-- Replace {{DATA_DATABASE}} (e.g. MEDSCOMA) and {{DATA_SCHEMA}} (e.g.
 -- DATA_LEX) before running. {{DATA_DATABASE}} must already exist.
 -- ============================================================================
 

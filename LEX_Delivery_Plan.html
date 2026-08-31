@@ -219,7 +219,7 @@
         <p>LEX gives the MR5 Transition Contracts Team a Streamlit chatbot that, for every Signed &amp; Executed Contract, automatically answers a fixed set of 16 stock questions — contract title, CW number, end date, one-sentence summary, novation/disclosure/termination/auto-renewal clauses, payment regime, securities, price review mechanisms, and more — the moment the contract (and any of its variations, extensions, or novations) is ingested. Users can also ask free-form follow-up questions against the same corpus. Every answer is grounded in the ingested text and carries numbered citations linking back to the source document's URL; the assistant declines rather than guesses when a contract doesn't address a question.</p>
         <p>Rather than building a new pipeline, LEX is proposed as a new <strong>project instance</strong> of <code class="mono">project-llm-wiki</code>, the reusable Snowflake Cortex engine this workspace already runs in production as <code class="mono">ORG_MM_CHAT</code>. That means most of the ingestion, retrieval, and citation machinery is proven and reused as-is; the real work is a contract-specific segmentation profile, sizing for documents up to 500 pages, a structured extraction layer that persists the 16 stock answers for every contract, contract-family linking across variations/extensions, and a tighter access boundary around a small, named user group.</p>
         <div class="callout">
-          <p><strong>What's genuinely new:</strong> a <code class="mono">LEX_CONTRACT</code> segmentation profile tuned to clause/schedule-structured legal text, a chunked-indexing fix for 100–500 page documents (the template's default 150,000-character cap silently truncates anything past roughly 50 pages), a <code class="mono">CONTRACT_REGISTER</code> / <code class="mono">CONTRACT_FIELD_EXTRACTS</code> layer that persists the 16 stock answers with a per-field citation and a human-verify flag, and an isolated database (<code class="mono">LEXDB</code>) + dedicated compute pool (<code class="mono">LEX_COMPUTE_POOL</code>) + RBAC role restricting the app to 3–5 people.</p>
+          <p><strong>What's genuinely new:</strong> a <code class="mono">LEX_CONTRACT</code> segmentation profile tuned to clause/schedule-structured legal text, a chunked-indexing fix for 100–500 page documents (the template's default 150,000-character cap silently truncates anything past roughly 50 pages), a <code class="mono">CONTRACT_REGISTER</code> / <code class="mono">CONTRACT_FIELD_EXTRACTS</code> layer that persists the 16 stock answers with a per-field citation and a human-verify flag, and an isolated database (<code class="mono">MEDSCOMA</code>) + dedicated compute pool (<code class="mono">STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT</code>) + RBAC role restricting the app to 3–5 people.</p>
         </div>
       </section>
 
@@ -291,7 +291,7 @@
 
               <!-- Security boundary -->
               <rect x="220" y="30" width="960" height="480" rx="4" stroke-dasharray="4 4" stroke="currentColor" opacity="0.55"/>
-              <text x="240" y="52" font-size="10.5" letter-spacing="1.5" fill="currentColor" stroke="none">LEXDB DATABASE · LEX_COMPUTE_POOL</text>
+              <text x="240" y="52" font-size="10.5" letter-spacing="1.5" fill="currentColor" stroke="none">MEDSCOMA DATABASE · STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT</text>
 
               <!-- RAW_DOCUMENTS -->
               <rect x="250" y="190" width="160" height="80" rx="3"/>
@@ -335,7 +335,7 @@
               <rect x="920" y="190" width="220" height="80" rx="3"/>
               <text x="1030" y="212" text-anchor="middle" font-size="12" fill="currentColor" stroke="none">LEX_APP (Streamlit)</text>
               <text x="1030" y="228" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">container runtime,</text>
-              <text x="1030" y="242" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">LEX_COMPUTE_POOL</text>
+              <text x="1030" y="242" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT</text>
               <text x="1030" y="256" text-anchor="middle" font-size="10" fill="currentColor" stroke="none">Chat page</text>
 
               <!-- CONTRACT_REGISTER + LINK -->
@@ -405,9 +405,9 @@
         <table>
           <tr><th>Setting</th><th>Proposed value</th><th>Rationale</th></tr>
           <tr><td class="mono">PROJECT_CODE</td><td class="mono">LEX</td><td>—</td></tr>
-          <tr><td class="mono">DATA_DATABASE</td><td class="mono">LEXDB <span class="tag decide">confirm</span></td><td><strong>New template field</strong> — dedicated database, to be created (<code class="mono">SYSADMIN</code>), same pattern as FRANK's <code class="mono">MEDSGOV</code></td></tr>
-          <tr><td class="mono">DATA_SCHEMA</td><td class="mono">DATA_LEX</td><td>Isolated tables/stage inside <code class="mono">LEXDB</code>, per the template's existing per-project pattern</td></tr>
-          <tr><td class="mono">COMPUTE_POOL</td><td class="mono">LEX_COMPUTE_POOL <span class="tag decide">confirm</span></td><td>Dedicated, not shared — to be created (<code class="mono">SYSADMIN</code>); size against Build-phase OCR/indexing throughput before committing a tier</td></tr>
+          <tr><td class="mono">DATA_DATABASE</td><td class="mono">MEDSCOMA <span class="tag decide">confirm</span></td><td><strong>New template field</strong> — dedicated database, to be created (<code class="mono">SYSADMIN</code>), same pattern as FRANK's <code class="mono">MEDSGOV</code></td></tr>
+          <tr><td class="mono">DATA_SCHEMA</td><td class="mono">DATA_LEX</td><td>Isolated tables/stage inside <code class="mono">MEDSCOMA</code>, per the template's existing per-project pattern</td></tr>
+          <tr><td class="mono">COMPUTE_POOL</td><td class="mono">STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT <span class="tag decide">confirm</span></td><td>Dedicated, not shared — to be created (<code class="mono">SYSADMIN</code>); size against Build-phase OCR/indexing throughput before committing a tier</td></tr>
           <tr><td class="mono">QUERY_WAREHOUSE</td><td class="mono">MTMWH02 <span class="tag decide">build only</span></td><td>Temporary for build/UAT; swap to a production warehouse before go-live</td></tr>
           <tr><td class="mono">SEGMENTATION_PROFILE</td><td class="mono">LEX_CONTRACT</td><td><strong>New</strong> — see §06</td></tr>
           <tr><td class="mono">SEGMENTATION_GRANULARITY</td><td class="mono">DETAILED</td><td>One section per clause/schedule rather than per whole contract, needed for precise citation at this document length</td></tr>
@@ -431,7 +431,7 @@
           <li>A dedicated Graph API app registration's <code class="mono">Sites.Selected</code> grant is scoped to just the contracts library, not the whole tenant, and not shared with <code class="mono">ORG_MM_CHAT</code>'s own registration — revoking LEX's access later shouldn't touch other projects.</li>
         </ul>
         <div class="callout amber">
-          <p><strong>Recommended: a fully separate database.</strong> <code class="mono">LEXDB</code> and <code class="mono">LEX_COMPUTE_POOL</code>, following the same precedent already set for FRANK's <code class="mono">MEDSGOV</code> / <code class="mono">STREAMLIT_COMPUTE_POOL_OCMS_GOVERNANCE</code> in this workspace — neither exists yet for LEX and both need <code class="mono">SYSADMIN</code> to create. The template's shared catalog bookkeeping (<code class="mono">MEDSOCMS.APP_CATALOG.PROJECTS</code>) still centralizes which projects exist and their settings; only LEX's actual data (schema, tables, stage) moves into <code class="mono">LEXDB</code>. That split needs the same <code class="mono">DATA_DATABASE</code> template extension FRANK's plan already scoped — implement it once, both projects benefit (see §07 Phase 1).</p>
+          <p><strong>Recommended: a fully separate database.</strong> <code class="mono">MEDSCOMA</code> and <code class="mono">STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT</code>, following the same precedent already set for FRANK's <code class="mono">MEDSGOV</code> / <code class="mono">STREAMLIT_COMPUTE_POOL_OCMS_GOVERNANCE</code> in this workspace — neither exists yet for LEX and both need <code class="mono">SYSADMIN</code> to create. The template's shared catalog bookkeeping (<code class="mono">MEDSOCMS.APP_CATALOG.PROJECTS</code>) still centralizes which projects exist and their settings; only LEX's actual data (schema, tables, stage) moves into <code class="mono">MEDSCOMA</code>. That split needs the same <code class="mono">DATA_DATABASE</code> template extension FRANK's plan already scoped — implement it once, both projects benefit (see §07 Phase 1).</p>
         </div>
       </section>
 
@@ -471,12 +471,12 @@
             <div class="stop-head"><h3>Provisioning</h3><span class="stop-dur">~3–5 days</span></div>
             <ul>
               <li><span class="tag new">New</span> Extend the template to support a per-project database, not just a per-project schema: add a <code class="mono">DATA_DATABASE</code> column to <code class="mono">PROJECTS</code>, thread it through <code class="mono">config.py</code>'s <code class="mono">ProjectConfig.qualified_schema</code>/<code class="mono">qualified_stage</code>, and add a target-database parameter to the <code class="mono">CREATE_PROJECT</code> procedure — it currently hardcodes <code class="mono">MEDSOCMS</code> as the one shared database.</li>
-              <li>Create <code class="mono">LEXDB</code> and <code class="mono">LEX_COMPUTE_POOL</code> under <code class="mono">SYSADMIN</code>.</li>
-              <li>Run the extended <code class="mono">CREATE_PROJECT('LEX', ...)</code> to create <code class="mono">LEXDB.DATA_LEX</code>, its stage, and the catalog row in <code class="mono">MEDSOCMS.APP_CATALOG.PROJECTS</code>.</li>
+              <li>Create <code class="mono">MEDSCOMA</code> and <code class="mono">STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT</code> under <code class="mono">SYSADMIN</code>.</li>
+              <li>Run the extended <code class="mono">CREATE_PROJECT('LEX', ...)</code> to create <code class="mono">MEDSCOMA.DATA_LEX</code>, its stage, and the catalog row in <code class="mono">MEDSOCMS.APP_CATALOG.PROJECTS</code>.</li>
               <li>Confirm <code class="mono">USAGE</code>/<code class="mono">MONITOR</code> on the compute pool and the shared PyPI access integration for container runtime.</li>
               <li>Create the <code class="mono">LEX_USERS</code> end-user role and grant it to the named accounts once the app is deployed.</li>
             </ul>
-            <p class="exit"><b>Exit</b> <code class="mono">LEXDB.DATA_LEX</code> schema exists via the extended <code class="mono">CREATE_PROJECT</code>; <code class="mono">LEX_USERS</code> role granted to exactly the named users.</p>
+            <p class="exit"><b>Exit</b> <code class="mono">MEDSCOMA.DATA_LEX</code> schema exists via the extended <code class="mono">CREATE_PROJECT</code>; <code class="mono">LEX_USERS</code> role granted to exactly the named users.</p>
           </div>
 
           <div class="stop" data-n="2">
@@ -546,7 +546,7 @@
         <ul>
           <li><span class="tag decide">Confirm</span> The "network drive" is a SharePoint library reachable via Graph API, as assumed throughout this plan — if it's a raw file share instead, the ingestion design in §04 changes.</li>
           <li><span class="tag decide">Confirm</span> The 3–5 named users, so <code class="mono">LEX_USERS</code> can be granted correctly at provisioning time.</li>
-          <li><span class="tag decide">Confirm</span> A fully separate database (<code class="mono">LEXDB</code>) and dedicated compute pool, following FRANK's precedent — who requests their creation under <code class="mono">SYSADMIN</code>, and their final names.</li>
+          <li><span class="tag decide">Confirm</span> A fully separate database (<code class="mono">MEDSCOMA</code>) and dedicated compute pool, following FRANK's precedent — who requests their creation under <code class="mono">SYSADMIN</code>, and their final names.</li>
           <li><span class="tag decide">Confirm</span> The production warehouse to cut over to at go-live — building on <code class="mono">MTMWH02</code> in the meantime.</li>
           <li><span class="tag decide">Confirm</span> What identifies the BG/Cash list ("Maureen's list") for the future securities-reconciliation view — file name and location.</li>
           <li><span class="tag decide">Confirm</span> The existing CW-number formatting convention, to make contract-family auto-linking reliable.</li>

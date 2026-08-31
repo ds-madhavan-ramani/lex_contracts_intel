@@ -10,7 +10,7 @@ module-level constants here.
 Difference from the org_mm_chat template this was forked from: a project's
 actual data can now live in its own DATABASE (ProjectConfig.data_database),
 not just its own schema inside the shared MEDSOCMS database — LEX uses
-this to get LEXDB as a fully isolated database. The shared catalog
+this to get MEDSCOMA as a fully isolated database. The shared catalog
 (APP_CATALOG.PROJECTS itself) always lives in MEDSOCMS regardless.
 """
 

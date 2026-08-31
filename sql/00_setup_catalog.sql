@@ -13,7 +13,7 @@
 -- LEX-specific difference from the org_mm_chat template this was forked
 -- from: a project's actual DATA_SCHEMA can now live in its own DATABASE
 -- (DATA_DATABASE), not just its own schema inside the shared MEDSOCMS
--- database. LEX uses this to get LEXDB as a fully isolated database. The
+-- database. LEX uses this to get MEDSCOMA as a fully isolated database. The
 -- catalog bookkeeping itself (this schema) stays centralized in MEDSOCMS
 -- either way — only a project's actual documents/index move.
 -- ============================================================================
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS PROJECTS (
     PROJECT_CODE            VARCHAR(50) NOT NULL UNIQUE,   -- e.g. 'LEX', short, upper snake_case
     PROJECT_NAME             VARCHAR(200) NOT NULL,         -- display name in Streamlit
     DESCRIPTION              VARCHAR(1000),
-    DATA_DATABASE             VARCHAR(100) NOT NULL DEFAULT 'MEDSOCMS',  -- e.g. 'LEXDB' — must already
+    DATA_DATABASE             VARCHAR(100) NOT NULL DEFAULT 'MEDSOCMS',  -- e.g. 'MEDSCOMA' — must already
                                                                           -- exist (created separately,
                                                                           -- typically by SYSADMIN); this
                                                                           -- template does not create databases
@@ -274,7 +274,7 @@ $$;
 -- TEARDOWN_PROJECT : drops a project's schema (from wherever DATA_DATABASE
 -- says it lives) and removes its catalog row. Logs (PROJECT_SYNC_LOG /
 -- PROJECT_QUERY_LOG) are left in place for audit history unless purge_logs
--- = TRUE. Never drops DATA_DATABASE itself (e.g. LEXDB) — only the
+-- = TRUE. Never drops DATA_DATABASE itself (e.g. MEDSCOMA) — only the
 -- project's own schema inside it, since other projects/objects may share
 -- that database.
 -- ----------------------------------------------------------------------------

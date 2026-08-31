@@ -75,7 +75,7 @@ Required Contracts Register (.xlsx)              SharePoint / network drive
         │  which CW numbers are in scope          (signed/executed PDFs)
         ▼                                                  │  Microsoft Graph API
 CONTRACT_REGISTER  ◄──────────────────────────────────────-┘
-   (LEXDB.DATA_LEX)        linked via CONTRACT_DOCUMENT_LINK
+   (MEDSCOMA.DATA_LEX)     linked via CONTRACT_DOCUMENT_LINK
         │                          │
         │                          ▼
         │                  RAW_DOCUMENTS — AI_PARSE_DOCUMENT (OCR), PDF/DOCX
@@ -133,10 +133,10 @@ table rows by their own label text, not position).
 |---|---|
 | Project code | `LEX` |
 | Display name | LEX - Legal EXtraction & Contract Intelligence |
-| Data database | `LEXDB` (dedicated — not the shared `MEDSOCMS`) |
-| Data schema | `LEXDB.DATA_LEX` |
+| Data database | `MEDSCOMA` (dedicated — not the shared `MEDSOCMS`) |
+| Data schema | `MEDSCOMA.DATA_LEX` |
 | Streamlit app | `MEDSOCMS.APP_CATALOG.LEX_APP` |
-| Compute pool | `LEX_COMPUTE_POOL` (container runtime, dedicated) |
+| Compute pool | `STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT` (container runtime, dedicated, `MIN_NODES=1 MAX_NODES=2`) |
 | Access | `LEX_USERS` role, granted only to named team members |
 | Segmentation profile | `LEX_CONTRACT` (clause/schedule-aware, not generic prose sectioning) |
 | Segmentation granularity | `DETAILED` (one section per clause, for precise citation in long documents) |
@@ -153,7 +153,7 @@ them.
 ## Prerequisites
 
 1. Snowflake access to the `ADVANCEDANALYTICS` role and `MTMWH02` warehouse.
-2. The `LEXDB` database and `LEX_COMPUTE_POOL` compute pool — typically
+2. The `MEDSCOMA` database and `STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT` compute pool — typically
    `SYSADMIN`/`ACCOUNTADMIN`-only to create; the provisioning notebook
    attempts both and prints the exact statements to hand to an admin if it
    can't.
@@ -185,9 +185,9 @@ Snowflake Notebooks. In order, it:
 2. **Sets up the shared catalog** (`MEDSOCMS.APP_CATALOG`) — skip if it
    already exists (it does, if `ORG_MM_CHAT` is already provisioned on this
    account).
-3. **Creates `LEXDB` + `LEX_COMPUTE_POOL`** — prints clear next steps if the
+3. **Creates `MEDSCOMA` + `STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT`** — prints clear next steps if the
    current role can't (see Prerequisites above).
-4. **Creates the LEX project** — `LEXDB.DATA_LEX` schema/stage, registered
+4. **Creates the LEX project** — `MEDSCOMA.DATA_LEX` schema/stage, registered
    in the catalog with its segmentation profile and retrieval settings.
    Confirm the SharePoint site/folder URLs before running this for real —
    left blank on purpose rather than guessed.
@@ -235,7 +235,7 @@ CALL TEARDOWN_PROJECT('LEX', TRUE);   -- purge logs too
 ```
 
 Drops the `LEX_APP` Streamlit app, its deploy stage, and
-`LEXDB.DATA_LEX` — not the `LEXDB` database itself, which may hold other
+`MEDSCOMA.DATA_LEX` — not the `MEDSCOMA` database itself, which may hold other
 objects.
 
 ## Under the hood: what's forked vs. new
@@ -251,7 +251,7 @@ What's actually new for LEX:
 
 | New | Why |
 |---|---|
-| `PROJECTS.DATA_DATABASE` (+ `CREATE_PROJECT`'s new parameter) | A project's data can now live in its own database (`LEXDB`), not just its own schema inside the shared `MEDSOCMS` |
+| `PROJECTS.DATA_DATABASE` (+ `CREATE_PROJECT`'s new parameter) | A project's data can now live in its own database (`MEDSCOMA`), not just its own schema inside the shared `MEDSOCMS` |
 | `PROJECTS.GRAPH_TENANT_ID` / `GRAPH_CLIENT_ID` / `GRAPH_SECRET_NAME` | Optional per-project dedicated Graph API app registration, for least-privilege ingestion, instead of always the shared tenant-level app |
 | `LEX_CONTRACT` segmentation profile (`index_builder.py`) | Clause/schedule-aware sectioning for legal contracts |
 | Chunked indexing (`index_builder.py`) | A 100–500 page contract doesn't fit in one indexing call |
