@@ -12,13 +12,14 @@ production on this account — LEX is a project instance forked from it.
 
 > **Note on the published Plan/Architecture docs** (`LEX_Delivery_Plan.html`,
 > `LEX_Solution_Architecture.html`, linked at the bottom): they describe an
-> earlier design centered on a free-form chatbot. The team has since
-> confirmed there's no need for that — LEX is a contract-lookup-and-report
-> tool instead (this README and the code reflect that). Those two documents
-> are correct on the shared infrastructure (Snowflake account, security
-> perimeter, database/compute-pool isolation) but stale on the application
-> design; treat them as historical pending a refresh, not as the current
-> spec.
+> earlier design centered on a free-form chatbot, and an earlier
+> infrastructure plan where LEX's catalog bookkeeping stayed in a database
+> shared with other project-llm-wiki projects. Both have since changed —
+> LEX is a contract-lookup-and-report tool instead of a chatbot, and it now
+> runs fully self-contained (its own database, catalog, Graph API
+> registration, and compute pool, with no shared resources at all; this
+> README and the code reflect both changes). Treat those two documents as
+> historical pending a refresh, not as the current spec.
 
 ## What it does
 
@@ -132,9 +133,11 @@ table rows by their own label text, not position).
 |---|---|
 | Project code | `LEX` |
 | Display name | LEX - Legal EXtraction & Contract Intelligence |
-| Data database | `MEDSCOMA` (dedicated — not the shared `MEDSOCMS`) |
+| Catalog database | `MEDSCOMA` (LEX's own — no shared database anywhere) |
+| Catalog schema | `MEDSCOMA.APP_CATALOG` (`PROJECTS`, `PROJECT_SYNC_LOG`, `PROJECT_QUERY_LOG`, Graph API secret) |
+| Data database | `MEDSCOMA` |
 | Data schema | `MEDSCOMA.DATA_LEX` |
-| Streamlit app | `MEDSOCMS.APP_CATALOG.LEX_APP` |
+| Streamlit app | `MEDSCOMA.APP_CATALOG.LEX_APP` |
 | Compute pool | `STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT` (container runtime, dedicated, `MIN_NODES=1 MAX_NODES=2`) |
 | Access | `LEX_USERS` role, granted only to named team members |
 | Segmentation profile | `LEX_CONTRACT` (clause/schedule-aware, not generic prose sectioning) |
@@ -149,17 +152,14 @@ These are all set in `pipeline/00_provision_project.ipynb`'s project-creation
 cell — see that notebook for the full, current values and how to change
 them.
 
-`MEDSOCMS` still appears above and throughout the notebook/SQL — that's not
-a leftover from before `MEDSCOMA` existed. `MEDSOCMS.APP_CATALOG` is the one
-shared catalog schema every project-llm-wiki project registers into
-(`PROJECTS`, `PROJECT_SYNC_LOG`, `PROJECT_QUERY_LOG`, the Graph API secret,
-and — by the same cross-project convention — every project's Streamlit
-app/stage objects), so LEX keeps using it for exactly that bookkeeping.
-Only LEX's actual data (`RAW_DOCUMENTS`, `DOCUMENT_INDEX`, `CONTRACT_
-REGISTER`, and the rest) is isolated in `MEDSCOMA.DATA_LEX` instead of a
-schema inside `MEDSOCMS`. If you'd rather the Streamlit app/stage objects
-also live under `MEDSCOMA` instead of the shared catalog, that's a small
-change to the deploy cell — flag it and it can be made.
+Everything LEX reads or writes lives in `MEDSCOMA` — its catalog
+(`APP_CATALOG`, forked from the project-llm-wiki template's usual pattern
+of centralizing that in a shared `MEDSOCMS` database used by every project
+on the account), its data (`DATA_LEX`), its Streamlit app/stage, and its
+own Graph API secret/network rule/external access integration. LEX holds
+no reference to `MEDSOCMS`, to any other project-llm-wiki project's
+resources, or to a compute pool other than its own dedicated
+`STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT`.
 
 ## Prerequisites
 
@@ -168,23 +168,21 @@ change to the deploy cell — flag it and it can be made.
    `SYSADMIN`/`ACCOUNTADMIN`-only to create; the provisioning notebook
    attempts both and prints the exact statements to hand to an admin if it
    can't.
-3. A Microsoft Graph API app registration with `Sites.Selected` permission
-   granted on the contracts library. LEX defaults to reusing the same
-   shared, tenant-level app registration every project-llm-wiki project uses
-   (`GRAPH_TENANT_ID`/`GRAPH_CLIENT_ID` in `python/config.py`, secret
-   `MEDSOCMS.APP_CATALOG.GRAPH_API_SECRET`) — see `sql/test_graph_
-   connectivity.sql` for how to give LEX its own dedicated, least-privilege
-   registration instead once one exists.
-4. The shared Graph API network rule + External Access Integration
-   (`MEDSOCMS.APP_CATALOG.GRAPH_API_NETWORK_RULE`,
-   `GRAPH_API_ACCESS_INTEGRATION`) — tenant-level, shared with every other
-   project-llm-wiki project on this account, not created by this repo.
-5. `python-docx` (the summary export) resolves via PyPI on container
+3. LEX's own Microsoft Graph API app registration (Azure AD), with
+   `Sites.Selected` permission granted on the contracts library. LEX does
+   not reuse any shared, tenant-level app registration — see
+   `sql/test_graph_connectivity.sql` for the one-time setup of its
+   dedicated secret (`MEDSCOMA.APP_CATALOG.LEX_GRAPH_API_SECRET`), network
+   rule, and external access integration, then set
+   `GRAPH_TENANT_ID`/`GRAPH_CLIENT_ID`/`GRAPH_SECRET_NAME` on LEX's
+   `PROJECTS` row (the provisioning notebook's Graph API registration
+   cell). Nothing about this is shared with any other project.
+4. `python-docx` (the summary export) resolves via PyPI on container
    runtime — no extra setup, but note it's deliberately **not** in
    `environment.yml` (would likely be unresolvable on warehouse runtime's
    Conda channel; see that file's own comment).
 
-Run `sql/test_graph_connectivity.sql` to confirm the three Graph API
+Run `sql/test_graph_connectivity.sql` to confirm LEX's own three Graph API
 objects exist before deploying.
 
 ## Deploying / running
@@ -193,9 +191,8 @@ Everything is `pipeline/00_provision_project.ipynb`, run top to bottom in
 Snowflake Notebooks. In order, it:
 
 1. **Connects** to Snowflake.
-2. **Sets up the shared catalog** (`MEDSOCMS.APP_CATALOG`) — skip if it
-   already exists (it does, if another project-llm-wiki project is already
-   provisioned on this account).
+2. **Sets up LEX's own catalog schema** (`MEDSCOMA.APP_CATALOG`) — skip if
+   it already exists (e.g. a re-run after the first provisioning pass).
 3. **Creates `MEDSCOMA` + `STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT`** — prints clear next steps if the
    current role can't (see Prerequisites above).
 4. **Creates the LEX project** — `MEDSCOMA.DATA_LEX` schema/stage, registered
@@ -260,8 +257,8 @@ robustness, and citation plumbing. What's actually new for LEX:
 
 | New | Why |
 |---|---|
-| `PROJECTS.DATA_DATABASE` (+ `CREATE_PROJECT`'s new parameter) | A project's data can now live in its own database (`MEDSCOMA`), not just its own schema inside the shared `MEDSOCMS` |
-| `PROJECTS.GRAPH_TENANT_ID` / `GRAPH_CLIENT_ID` / `GRAPH_SECRET_NAME` | Optional per-project dedicated Graph API app registration, for least-privilege ingestion, instead of always the shared tenant-level app |
+| `PROJECTS.DATA_DATABASE` (+ `CREATE_PROJECT`'s new parameter) | A project's data can now live in its own database (`MEDSCOMA`), not just its own schema inside the shared `MEDSOCMS` this template otherwise defaults to — LEX also moved its catalog schema itself into `MEDSCOMA`, so it holds no shared database at all |
+| `PROJECTS.GRAPH_TENANT_ID` / `GRAPH_CLIENT_ID` / `GRAPH_SECRET_NAME` | LEX's own dedicated Graph API app registration, for least-privilege ingestion — mandatory, not optional: `config.py`'s `resolved_graph_*` properties raise clearly if unset, since LEX has no shared tenant-level app to fall back to |
 | `LEX_CONTRACT` segmentation profile (`index_builder.py`) | Clause/schedule-aware sectioning for legal contracts |
 | Chunked indexing (`index_builder.py`) | A 100–500 page contract doesn't fit in one indexing call |
 | `query_engine.search()`'s `restrict_to_doc_ids` parameter | Scopes search to one contract's linked documents — what makes stock-field extraction just "search with the document set pre-selected" |

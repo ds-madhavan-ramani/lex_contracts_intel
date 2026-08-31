@@ -1,47 +1,53 @@
 -- ============================================================================
 -- LEX : 00_setup_catalog.sql
--- One-time setup. Creates the central catalog schema shared across every
--- llm-wiki-style project on this account — including projects from OTHER
--- other repos built from the same project-llm-wiki template. Safe to
+-- One-time setup. Creates LEX's own catalog schema — dedicated to LEX,
+-- not shared with any other project or database on this account. Safe to
 -- re-run: every statement is CREATE ... IF NOT EXISTS.
 --
--- Infra values carried over unchanged from project-llm-wiki:
---   Warehouse : MTMWH02
---   Catalog   : MEDSOCMS.APP_CATALOG (shared, database is always MEDSOCMS)
+-- LEX is forked from the project-llm-wiki template, which normally
+-- centralizes this catalog schema in a shared MEDSOCMS database used by
+-- every project on the account. LEX does not follow that part of the
+-- template: its catalog lives in MEDSCOMA instead — the same dedicated
+-- database its actual data lives in — so nothing about LEX is stored in,
+-- or depends on, MEDSOCMS or any other shared resource.
+--
+-- Infra values:
+--   Warehouse : MTMWH02 (build-phase; see the provisioning notebook)
+--   Catalog   : MEDSCOMA.APP_CATALOG (LEX's own, dedicated)
 --   Role      : ADVANCEDANALYTICS
 --
--- LEX-specific difference from the project-llm-wiki template this was forked
--- from: a project's actual DATA_SCHEMA can now live in its own DATABASE
--- (DATA_DATABASE), not just its own schema inside the shared MEDSOCMS
--- database. LEX uses this to get MEDSCOMA as a fully isolated database. The
--- catalog bookkeeping itself (this schema) stays centralized in MEDSOCMS
--- either way — only a project's actual documents/index move.
+-- MEDSCOMA must already exist (created separately, typically by SYSADMIN —
+-- see the provisioning notebook's database/compute-pool cell). This script
+-- does not create databases.
 -- ============================================================================
 
 USE ROLE ADVANCEDANALYTICS;
 USE WAREHOUSE MTMWH02;
-USE DATABASE MEDSOCMS;
+USE DATABASE MEDSCOMA;
 
-CREATE SCHEMA IF NOT EXISTS MEDSOCMS.APP_CATALOG;
-USE SCHEMA MEDSOCMS.APP_CATALOG;
+CREATE SCHEMA IF NOT EXISTS MEDSCOMA.APP_CATALOG;
+USE SCHEMA MEDSCOMA.APP_CATALOG;
 
 -- ----------------------------------------------------------------------------
--- PROJECTS : one row per project instance of the template. A project's data
--- lives at DATA_DATABASE.DATA_SCHEMA (DATA_DATABASE defaults to 'MEDSOCMS',
--- matching every project created before this column existed) and owns that
--- schema's RAW_DOCUMENTS / DOCUMENT_INDEX tables. Everything a Streamlit
--- session or ingestion job needs to behave "per project" lives on this row,
--- not in a config.py file.
+-- PROJECTS : one row for LEX (the CREATE_PROJECT/TEARDOWN_PROJECT machinery
+-- below keeps the project-llm-wiki template's per-project-row shape, even
+-- though this catalog is dedicated to LEX alone). LEX's data lives at
+-- DATA_DATABASE.DATA_SCHEMA (DATA_DATABASE defaults to 'MEDSCOMA' — LEX's
+-- own database, never the shared MEDSOCMS this template otherwise
+-- defaults to) and owns that schema's RAW_DOCUMENTS / DOCUMENT_INDEX
+-- tables. Everything a Streamlit session or ingestion job needs to behave
+-- "per project" lives on this row, not in a config.py file.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS PROJECTS (
     PROJECT_ID              INT IDENTITY PRIMARY KEY,
     PROJECT_CODE            VARCHAR(50) NOT NULL UNIQUE,   -- e.g. 'LEX', short, upper snake_case
     PROJECT_NAME             VARCHAR(200) NOT NULL,         -- display name in Streamlit
     DESCRIPTION              VARCHAR(1000),
-    DATA_DATABASE             VARCHAR(100) NOT NULL DEFAULT 'MEDSOCMS',  -- e.g. 'MEDSCOMA' — must already
-                                                                          -- exist (created separately,
-                                                                          -- typically by SYSADMIN); this
-                                                                          -- template does not create databases
+    DATA_DATABASE             VARCHAR(100) NOT NULL DEFAULT 'MEDSCOMA',  -- LEX's own dedicated database —
+                                                                          -- must already exist (created
+                                                                          -- separately, typically by
+                                                                          -- SYSADMIN); this template does
+                                                                          -- not create databases
     DATA_SCHEMA               VARCHAR(100) NOT NULL,          -- e.g. 'DATA_LEX'
     STAGE_NAME                VARCHAR(100) NOT NULL,          -- e.g. 'DOCS_STAGE' (unqualified, lives in DATA_SCHEMA)
 
@@ -57,20 +63,22 @@ CREATE TABLE IF NOT EXISTS PROJECTS (
     SHAREPOINT_SITE_URL       VARCHAR(500),
     SHAREPOINT_DEFAULT_FOLDER VARCHAR(1000),
 
-    -- Optional per-project Graph API app registration, for least-privilege
-    -- ingestion (a dedicated service account scoped to only this project's
-    -- library, rather than the shared tenant-level app every project uses
-    -- by default). All three NULL (the default) means "use the shared
-    -- tenant-level GRAPH_TENANT_ID/GRAPH_CLIENT_ID/GRAPH_SECRET_NAME
-    -- constants in python/config.py" — see config.py's fallback logic.
-    -- GRAPH_TENANT_ID/GRAPH_CLIENT_ID are not secret (Microsoft surfaces
-    -- both on the app registration's own Overview page), so they're plain
-    -- columns here like everything else on this row; only the secret's
-    -- *name* is stored — its value lives in a Snowflake SECRET object,
-    -- created and bound separately (see sql/test_graph_connectivity.sql).
+    -- LEX's own Graph API app registration — a dedicated service account
+    -- scoped to only the contracts library. Unlike the project-llm-wiki
+    -- template's usual pattern (a shared tenant-level app every project
+    -- reuses by default), LEX has no shared fallback: these three columns
+    -- must be populated (see the provisioning notebook's Graph API
+    -- registration cell) before SharePoint ingestion will work —
+    -- config.py's resolved_graph_* properties raise clearly if they're
+    -- not. GRAPH_TENANT_ID/GRAPH_CLIENT_ID are not secret (Microsoft
+    -- surfaces both on the app registration's own Overview page), so
+    -- they're plain columns here like everything else on this row; only
+    -- the secret's *name* is stored — its value lives in a Snowflake
+    -- SECRET object, created and bound separately (see
+    -- sql/test_graph_connectivity.sql).
     GRAPH_TENANT_ID            VARCHAR(100),
     GRAPH_CLIENT_ID            VARCHAR(100),
-    GRAPH_SECRET_NAME          VARCHAR(200),   -- fully qualified, e.g. 'MEDSOCMS.APP_CATALOG.LEX_GRAPH_API_SECRET'
+    GRAPH_SECRET_NAME          VARCHAR(200),   -- fully qualified, e.g. 'MEDSCOMA.APP_CATALOG.LEX_GRAPH_API_SECRET'
 
     -- Per-project model / tuning knobs (were hardcoded in config.py)
     ACTIVE_MODEL               VARCHAR(50)  DEFAULT 'claude-haiku-4-5',
@@ -161,7 +169,7 @@ CREATE OR REPLACE PROCEDURE CREATE_PROJECT(
     CREATED_BY                   VARCHAR,
     QUERY_WAREHOUSE                VARCHAR,   -- pass '' or NULL to use the default 'MTMWH02'
     COMPUTE_POOL                    VARCHAR,   -- pass '' or NULL for warehouse runtime (no compute pool)
-    DATA_DATABASE                    VARCHAR    -- pass '' or NULL to use the default 'MEDSOCMS'
+    DATA_DATABASE                    VARCHAR    -- pass '' or NULL to use the default 'MEDSCOMA'
 )
 RETURNS VARCHAR
 LANGUAGE PYTHON
@@ -189,7 +197,7 @@ def run(session, project_code, project_name, description,
     if existing[0]["C"] > 0:
         raise ValueError(f"Project code '{code}' already exists")
 
-    data_database = (data_database or "").strip().upper() or "MEDSOCMS"
+    data_database = (data_database or "").strip().upper() or "MEDSCOMA"
     data_schema = f"DATA_{code}"
     stage_name = "DOCS_STAGE"
     streamlit_app_name = f"{code}_APP"
@@ -247,10 +255,10 @@ def run(session, project_code, project_name, description,
 
     # 3. Create this project's own Streamlit deployment stage (separate from
     #    its data stage — this one holds app code, not documents). Always
-    #    in the shared MEDSOCMS.APP_CATALOG, regardless of data_database —
-    #    app code isn't sensitive contract data.
+    #    in MEDSCOMA.APP_CATALOG — LEX's own catalog schema, not a database
+    #    shared with anything else.
     session.sql(
-        f"CREATE STAGE IF NOT EXISTS MEDSOCMS.APP_CATALOG.{streamlit_stage_name}"
+        f"CREATE STAGE IF NOT EXISTS MEDSCOMA.APP_CATALOG.{streamlit_stage_name}"
     ).collect()
 
     # 4. Register in the catalog
@@ -266,8 +274,8 @@ def run(session, project_code, project_name, description,
     ).collect()
 
     return (f"Project '{code}' created. Data schema {data_database}.{data_schema} and "
-            f"deploy stage MEDSOCMS.APP_CATALOG.{streamlit_stage_name} are ready. "
-            f"Run the deploy notebook cell next to create MEDSOCMS.APP_CATALOG.{streamlit_app_name}.")
+            f"deploy stage MEDSCOMA.APP_CATALOG.{streamlit_stage_name} are ready. "
+            f"Run the deploy notebook cell next to create MEDSCOMA.APP_CATALOG.{streamlit_app_name}.")
 $$;
 
 -- ----------------------------------------------------------------------------
@@ -299,8 +307,8 @@ def run(session, project_code, purge_logs):
     project_id, data_database, data_schema = r["PROJECT_ID"], r["DATA_DATABASE"], r["DATA_SCHEMA"]
     streamlit_app_name, streamlit_stage_name = r["STREAMLIT_APP_NAME"], r["STREAMLIT_STAGE_NAME"]
 
-    session.sql(f"DROP STREAMLIT IF EXISTS MEDSOCMS.APP_CATALOG.{streamlit_app_name}").collect()
-    session.sql(f"DROP STAGE IF EXISTS MEDSOCMS.APP_CATALOG.{streamlit_stage_name}").collect()
+    session.sql(f"DROP STREAMLIT IF EXISTS MEDSCOMA.APP_CATALOG.{streamlit_app_name}").collect()
+    session.sql(f"DROP STAGE IF EXISTS MEDSCOMA.APP_CATALOG.{streamlit_stage_name}").collect()
     session.sql(f"DROP SCHEMA IF EXISTS {data_database}.{data_schema} CASCADE").collect()
     session.sql("DELETE FROM PROJECTS WHERE PROJECT_ID = ?", params=[project_id]).collect()
 

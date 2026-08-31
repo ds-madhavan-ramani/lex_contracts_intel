@@ -1,49 +1,31 @@
 """
-config.py — infra constants + per-project config loader.
+config.py — infra constants + LEX's config loader.
 
-Forked from the project-llm-wiki template, which also runs other projects
-in production on this account. A project's settings are a
-row in MEDSOCMS.APP_CATALOG.PROJECTS, fetched at runtime — only true infra
-constants (shared across every project on this account) stay as
-module-level constants here.
-
-Difference from the project-llm-wiki template this was forked from: a project's
-actual data can now live in its own DATABASE (ProjectConfig.data_database),
-not just its own schema inside the shared MEDSOCMS database — LEX uses
-this to get MEDSCOMA as a fully isolated database. The shared catalog
-(APP_CATALOG.PROJECTS itself) always lives in MEDSOCMS regardless.
+Forked from the project-llm-wiki template, which centralizes its catalog
+and Graph API registration in a shared MEDSOCMS database used by every
+project on the account. LEX does not follow that part of the template:
+it is fully self-contained in its own MEDSCOMA database — catalog
+(APP_CATALOG.PROJECTS), data (DATA_LEX), Streamlit app/stage, and its own
+dedicated Graph API secret/network rule all live there. Nothing LEX reads
+or writes lives in MEDSOCMS, and it holds no reference to any other
+project's resources.
 """
 
 from dataclasses import dataclass
 from typing import Optional
 
 # ---------------------------------------------------------------------------
-# Infra constants — these are truly account-wide, not per-project. Warehouse
-# and compute pool are NOT here — they're per-project columns on PROJECTS
-# (QUERY_WAREHOUSE, COMPUTE_POOL), since different projects may want
-# different compute. MTMWH02 below is only the *fallback default* a new
-# project gets if none is specified at creation time. DATABASE/CATALOG_SCHEMA
-# are where the shared catalog itself lives — NOT necessarily where a given
-# project's own data lives; see ProjectConfig.data_database for that.
+# Infra constants. Warehouse and compute pool are NOT here — they're
+# per-project columns on PROJECTS (QUERY_WAREHOUSE, COMPUTE_POOL). MTMWH02
+# below is only the *fallback default* if none is specified at creation
+# time. DATABASE/CATALOG_SCHEMA are where LEX's own catalog lives —
+# MEDSCOMA, the same dedicated database LEX's actual data lives in (see
+# ProjectConfig.data_database) — not a database shared with anything else.
 # ---------------------------------------------------------------------------
 WAREHOUSE_NAME = "MTMWH02"  # default only — see ProjectConfig.query_warehouse
-DATABASE = "MEDSOCMS"       # home of the shared catalog (APP_CATALOG), always
+DATABASE = "MEDSCOMA"       # home of LEX's own catalog (APP_CATALOG), always
 ROLE = "ADVANCEDANALYTICS"
 CATALOG_SCHEMA = "APP_CATALOG"
-
-# Graph API app registration — tenant-level, shared by default across every
-# project's SharePoint/network-drive ingestion. Tenant ID / Client ID are
-# not secret (Microsoft treats both as public identifiers, visible on the
-# app registration's own Overview page), so they're plain constants here,
-# unlike the client secret — which is fetched from the Snowflake SECRET
-# object referenced in sql/test_graph_connectivity.sql and never stored in
-# this repo. A project can override all three via its own
-# GRAPH_TENANT_ID/GRAPH_CLIENT_ID/GRAPH_SECRET_NAME columns on PROJECTS
-# (see ProjectConfig properties below) for a dedicated, least-privilege
-# registration instead of this shared default.
-GRAPH_TENANT_ID = "23cc5cff-1cb6-4a63-9c82-97d2a2721787"
-GRAPH_CLIENT_ID = "8bc3d2b4-594a-4fd1-a9c8-bf6ef8db1caa"
-GRAPH_SECRET_NAME = f"{DATABASE}.{CATALOG_SCHEMA}.GRAPH_API_SECRET"
 
 # Model fallback if a project row doesn't specify one
 FREE_MODEL = "llama3.1-70b"
@@ -53,7 +35,7 @@ MIN_PARSED_TEXT_CHARS = 100
 
 @dataclass
 class ProjectConfig:
-    """One row of MEDSOCMS.APP_CATALOG.PROJECTS, typed."""
+    """One row of MEDSCOMA.APP_CATALOG.PROJECTS, typed."""
     project_id: int
     project_code: str
     project_name: str
@@ -110,23 +92,46 @@ class ProjectConfig:
 
     @property
     def resolved_graph_tenant_id(self) -> str:
-        """This project's Graph tenant ID, or the shared tenant-level
-        default if it hasn't been given its own dedicated registration."""
-        return self.graph_tenant_id or GRAPH_TENANT_ID
+        """LEX's own Graph API tenant ID, set on the PROJECTS row by the
+        provisioning notebook's Graph API registration cell. There is no
+        shared/tenant-level fallback — LEX does not reuse any other
+        project's app registration — so this raises clearly instead of
+        silently falling through to an undefined value."""
+        if not self.graph_tenant_id:
+            raise ValueError(
+                "GRAPH_TENANT_ID is not set on the PROJECTS row. Run the Graph "
+                "API registration cell in pipeline/00_provision_project.ipynb "
+                "first — LEX has no shared registration to fall back to."
+            )
+        return self.graph_tenant_id
 
     @property
     def resolved_graph_client_id(self) -> str:
-        return self.graph_client_id or GRAPH_CLIENT_ID
+        if not self.graph_client_id:
+            raise ValueError(
+                "GRAPH_CLIENT_ID is not set on the PROJECTS row. Run the Graph "
+                "API registration cell in pipeline/00_provision_project.ipynb "
+                "first — LEX has no shared registration to fall back to."
+            )
+        return self.graph_client_id
 
     @property
     def resolved_graph_secret_name(self) -> str:
-        """Fully-qualified secret object name. Note this only affects which
+        """Fully-qualified secret object name — always LEX's own, e.g.
+        MEDSCOMA.APP_CATALOG.LEX_GRAPH_API_SECRET (see
+        sql/test_graph_connectivity.sql). Note this only affects which
         SECRET object the deploy step binds under the Streamlit app's fixed
         local alias 'graph_secret' — application code always reads
         st.secrets['graph_secret'] regardless (see utils/graph_client.py),
         so no code path needs to know which underlying secret that alias
         actually points to."""
-        return self.graph_secret_name or GRAPH_SECRET_NAME
+        if not self.graph_secret_name:
+            raise ValueError(
+                "GRAPH_SECRET_NAME is not set on the PROJECTS row. Run the Graph "
+                "API registration cell in pipeline/00_provision_project.ipynb "
+                "first — LEX has no shared secret to fall back to."
+            )
+        return self.graph_secret_name
 
 
 def load_project(session, project_code: str) -> ProjectConfig:

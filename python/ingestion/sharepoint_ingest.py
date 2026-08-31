@@ -45,10 +45,10 @@ class IngestResult:
 
 
 def _get_token(project: ProjectConfig) -> str:
-    """Uses this project's own dedicated Graph app registration if it has
-    one (PROJECTS.GRAPH_TENANT_ID/GRAPH_CLIENT_ID), otherwise the shared
-    tenant-level default — see config.py's ProjectConfig.resolved_graph_*
-    properties."""
+    """Uses LEX's own dedicated Graph app registration (PROJECTS.
+    GRAPH_TENANT_ID/GRAPH_CLIENT_ID) — there's no shared tenant-level
+    fallback; see config.py's ProjectConfig.resolved_graph_* properties,
+    which raise clearly if these aren't set."""
     return graph_client._get_access_token(
         project.resolved_graph_tenant_id,
         project.resolved_graph_client_id,
