@@ -13,8 +13,8 @@ in its own database, not just its own schema.
         --sharepoint-site "https://metrotrains.sharepoint.com/sites/<contracts-site>" \\
         --sharepoint-folder "https://metrotrains.sharepoint.com/:f:/s/<contracts-site>/..." \\
         --query-warehouse MTMWH02 \\
-        --compute-pool LEX_COMPUTE_POOL \\
-        --data-database LEXDB
+        --compute-pool STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT \\
+        --data-database MEDSCOMA
 """
 
 import argparse

@@ -17,7 +17,7 @@
 -- "Schema migrations" cell instead (ALTER TABLE ... ADD COLUMN IF NOT
 -- EXISTS), the same forward-only pattern the rest of this template uses.
 --
--- Replace {{DATA_DATABASE}} (e.g. LEXDB) and {{DATA_SCHEMA}} (e.g.
+-- Replace {{DATA_DATABASE}} (e.g. MEDSCOMA) and {{DATA_SCHEMA}} (e.g.
 -- DATA_LEX) before running by hand.
 -- ============================================================================
 

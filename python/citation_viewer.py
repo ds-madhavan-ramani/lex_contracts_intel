@@ -56,7 +56,7 @@ _PDFJS_BASE = f"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/{_PDFJS_VERSION}"
 def get_presigned_url(session, project: ProjectConfig, stage_path: str,
                       expiry_secs: int = 3600) -> Optional[str]:
     """stage_path is RAW_DOCUMENTS.STAGE_PATH, e.g.
-    'LEXDB.DATA_LEX.DOCS_STAGE/CW12345_Executed.pdf' — strips the leading
+    'MEDSCOMA.DATA_LEX.DOCS_STAGE/CW12345_Executed.pdf' — strips the leading
     qualified-stage prefix to get the path GET_PRESIGNED_URL expects
     relative to the stage. Returns None (never raises) if the file can't
     be resolved — a broken citation link shouldn't crash the page it's on."""

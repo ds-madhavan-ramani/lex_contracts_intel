@@ -95,14 +95,14 @@
     </div>
     <div class="meta">
       <span class="chip">MR5 Transition Contracts Team</span>
-      <span class="chip">LEXDB · LEX_COMPUTE_POOL (proposed)</span>
+      <span class="chip">MEDSCOMA · STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT (proposed)</span>
       <span class="chip">Build phase — MTMWH02</span>
     </div>
   </div>
 
   <div class="diagram-frame">
     <figure>
-      <svg viewBox="0 0 1520 800" role="img" aria-label="A security perimeter, connected over Azure Private Link with no public internet, encloses the entire MTM Network on one side — corporate users plus MTM's own Microsoft 365 tenant, including the SharePoint library holding the Signed and Executed Contracts — and the Snowflake account, hosted on MTM's Azure cloud, on the other. Inside Snowflake, three to five named users, gated by the LEX_USERS role, reach LEX_APP on the LEX_COMPUTE_POOL compute pool, which issues SQL through the MTMWH02 warehouse to read and write RAW_DOCUMENTS, DOCUMENT_INDEX, CONTRACT_REGISTER, CONTRACT_DOCUMENT_LINK, CONTRACT_FIELD_EXTRACTS and DOCS_STAGE in LEXDB.DATA_LEX, and PROJECTS, PROJECT_SYNC_LOG and PROJECT_QUERY_LOG in MEDSOCMS.APP_CATALOG. Snowflake reaches the contracts library using a service-account Azure AD app registration with Sites.Selected scope, entirely within this same security perimeter — no external internet hop is involved, since the library is MTM's own asset. The one path that does cross the perimeter is a cross-region inference call from the warehouse to Snowflake Cortex running in the AWS Australia region, needed for AI_COMPLETE, AI_EMBED and AI_PARSE_DOCUMENT. Citations in chat and Contract Register answers link directly from the user's browser to the contract document, bypassing Snowflake, while staying inside the same MTM network.">
+      <svg viewBox="0 0 1520 800" role="img" aria-label="A security perimeter, connected over Azure Private Link with no public internet, encloses the entire MTM Network on one side — corporate users plus MTM's own Microsoft 365 tenant, including the SharePoint library holding the Signed and Executed Contracts — and the Snowflake account, hosted on MTM's Azure cloud, on the other. Inside Snowflake, three to five named users, gated by the LEX_USERS role, reach LEX_APP on the STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT compute pool, which issues SQL through the MTMWH02 warehouse to read and write RAW_DOCUMENTS, DOCUMENT_INDEX, CONTRACT_REGISTER, CONTRACT_DOCUMENT_LINK, CONTRACT_FIELD_EXTRACTS and DOCS_STAGE in MEDSCOMA.DATA_LEX, and PROJECTS, PROJECT_SYNC_LOG and PROJECT_QUERY_LOG in MEDSOCMS.APP_CATALOG. Snowflake reaches the contracts library using a service-account Azure AD app registration with Sites.Selected scope, entirely within this same security perimeter — no external internet hop is involved, since the library is MTM's own asset. The one path that does cross the perimeter is a cross-region inference call from the warehouse to Snowflake Cortex running in the AWS Australia region, needed for AI_COMPLETE, AI_EMBED and AI_PARSE_DOCUMENT. Citations in chat and Contract Register answers link directly from the user's browser to the contract document, bypassing Snowflake, while staying inside the same MTM network.">
         <defs>
           <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
@@ -169,7 +169,7 @@
           <text x="500" y="200" text-anchor="middle" font-size="10" fill="currentColor">Streamlit-in-Snowflake (container)</text>
           <text x="500" y="216" text-anchor="middle" font-size="10" fill="currentColor">Chat · Contract Register · Data Sources</text>
           <text x="500" y="236" text-anchor="middle" font-size="9.5" fill="currentColor" opacity="0.85">runs on compute pool ↓</text>
-          <text x="500" y="252" text-anchor="middle" font-size="10.5" fill="currentColor" font-weight="600">LEX_COMPUTE_POOL</text>
+          <text x="500" y="252" text-anchor="middle" font-size="10.5" fill="currentColor" font-weight="600">STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT</text>
           <text x="500" y="266" text-anchor="middle" font-size="9" fill="currentColor" opacity="0.8">(dedicated, not shared)</text>
 
           <!-- Warehouse -->
@@ -189,9 +189,9 @@
           <line x1="670" y1="222" x2="706" y2="222" stroke="currentColor" stroke-width="1.4" marker-end="url(#arrow)"/>
           <text x="688" y="208" text-anchor="middle" font-size="8.5" fill="currentColor">SQL</text>
 
-          <!-- Data layer: LEXDB.DATA_LEX -->
+          <!-- Data layer: MEDSCOMA.DATA_LEX -->
           <rect x="330" y="330" width="340" height="200" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
-          <text x="500" y="354" text-anchor="middle" font-size="12.5" fill="currentColor">LEXDB . DATA_LEX</text>
+          <text x="500" y="354" text-anchor="middle" font-size="12.5" fill="currentColor">MEDSCOMA . DATA_LEX</text>
           <line x1="350" y1="366" x2="650" y2="366" stroke="currentColor" stroke-width="0.6" opacity="0.4"/>
           <text x="350" y="384" font-size="9.5" fill="currentColor">• RAW_DOCUMENTS / DOCS_STAGE</text>
           <text x="362" y="397" font-size="8.5" fill="currentColor" opacity="0.8">parsed text, SOURCE_URL, hash</text>
@@ -215,7 +215,7 @@
           <text x="730" y="454" font-size="10" fill="currentColor">• PROJECT_QUERY_LOG</text>
           <text x="742" y="469" font-size="9" fill="currentColor" opacity="0.8">Q&amp;A audit log (question, answer, citations)</text>
 
-          <!-- Warehouse -> LEXDB / APP_CATALOG -->
+          <!-- Warehouse -> MEDSCOMA / APP_CATALOG -->
           <path d="M 830 290 L 540 330" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#arrow)"/>
           <text x="660" y="315" text-anchor="middle" font-size="9" fill="currentColor">reads / writes</text>
           <line x1="880" y1="290" x2="880" y2="326" stroke="currentColor" stroke-width="1.4" marker-end="url(#arrow)"/>
@@ -330,7 +330,7 @@
   <p class="tnote">* Cortex calls (<code>AI_COMPLETE</code>, <code>AI_EMBED</code>, <code>AI_PARSE_DOCUMENT</code>) execute via Snowflake's AWS AU cross-region inference whenever the required model isn't available in the account's home Azure region — the only call in this table that actually leaves the security perimeter.</p>
 
   <div class="foot">
-    Companion to the <strong>LEX Delivery Plan</strong> · assumes a dedicated <code>LEXDB</code> database and <code>LEX_COMPUTE_POOL</code> compute pool, following the same pattern as FRANK's <code>MEDSGOV</code> / <code>STREAMLIT_COMPUTE_POOL_OCMS_GOVERNANCE</code> — neither created yet for LEX · <code>MTMWH02</code> as the temporary build warehouse · Azure Private Link connectivity between the MTM Network (including its SharePoint / Microsoft 365 tenant) and Snowflake · cross-region inference to AWS AU for Cortex AI functions · access under named individual logins via the <code>LEX_USERS</code> role, pending confirmation of a dedicated service account for the ingestion path.
+    Companion to the <strong>LEX Delivery Plan</strong> · assumes a dedicated <code>MEDSCOMA</code> database and <code>STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT</code> compute pool, following the same pattern as FRANK's <code>MEDSGOV</code> / <code>STREAMLIT_COMPUTE_POOL_OCMS_GOVERNANCE</code> — neither created yet for LEX · <code>MTMWH02</code> as the temporary build warehouse · Azure Private Link connectivity between the MTM Network (including its SharePoint / Microsoft 365 tenant) and Snowflake · cross-region inference to AWS AU for Cortex AI functions · access under named individual logins via the <code>LEX_USERS</code> role, pending confirmation of a dedicated service account for the ingestion path.
   </div>
 
 </div>

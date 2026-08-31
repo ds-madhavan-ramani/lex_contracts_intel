@@ -7,7 +7,7 @@ dependencies = [
     # Container runtime's minimum supported Streamlit version is 1.50 —
     # warehouse runtime is capped at whatever Snowflake's Conda channel
     # offers for this account. LEX runs on container runtime from the
-    # start (LEX_COMPUTE_POOL) rather than migrating to it later, since a
+    # start (STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT) rather than migrating to it later, since a
     # modern Streamlit and predictable container resources both matter
     # more here than for a small meeting-minutes deployment: 100-500 page
     # OCR/indexing runs and up to ~600 documents at Scale phase. Pinned
