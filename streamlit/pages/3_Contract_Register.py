@@ -23,6 +23,7 @@ import contract_linking
 import contract_extraction
 import required_contracts
 from citation_panel_ui import render_citation_panel
+from docx_report import build_contract_docx
 
 st.set_page_config(page_title="Contract Register — LEX", page_icon="📋", layout="wide")
 
@@ -144,22 +145,32 @@ for family in families:
                 contract_linking.unlink_document(session, project, family.contract_id, d["DOC_ID"])
                 st.rerun()
 
-        if st.button("Run/refresh extraction for this contract",
-                     key=f"extract_{family.contract_id}", type="primary"):
+        extract_col, download_col = st.columns([2, 1])
+        if extract_col.button("Run/refresh extraction for this contract",
+                              key=f"extract_{family.contract_id}", type="primary"):
             with st.spinner("Running the standard questions…"):
                 contract_extraction.extract_stock_fields_for_contract(session, project, family.contract_id)
             st.success("Extraction complete.")
             st.rerun()
 
         contract_row = contract_linking.get_contract(session, project, family.contract_id)
+        if contract_row:
+            download_col.download_button(
+                "⬇ Download summary (.docx)",
+                data=build_contract_docx(session, project, family.contract_id),
+                file_name=f"{family.cw_number}_Contract_Workspace_Summary.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key=f"download_{family.contract_id}",
+            )
+
         if contract_row and contract_row.get("OVERVIEW_SUMMARY"):
-            st.markdown("**Overview**")
+            st.markdown("**Executive Assessment**")
             st.write(contract_row["OVERVIEW_SUMMARY"])
 
-        st.markdown("**Standard questions**")
-        fields = contract_extraction.get_contract_fields(session, project, family.contract_id)
-        for f in fields:
-            field_key = f["FIELD_KEY"]
+        fields = {f["FIELD_KEY"]: f for f in contract_extraction.get_contract_fields(session, project, family.contract_id)}
+
+        def _render_field(field_key):
+            f = fields[field_key]
             confidence = f.get("CONFIDENCE")
             with st.container(border=True):
                 head_cols = st.columns([4, 2])
@@ -185,3 +196,43 @@ for family in families:
                             verified, verified_by=current_user,
                         )
                         st.rerun()
+
+        st.markdown("**Contract detail**")
+        for key in contract_extraction.CONTRACT_DETAIL_FIELDS:
+            _render_field(key)
+
+        st.markdown("**Executive Assessment — findings**")
+        for key in contract_extraction.EXECUTIVE_ASSESSMENT_FIELDS:
+            _render_field(key)
+
+        st.markdown("**Significant Variations**")
+        variations = contract_linking.get_significant_variations(session, project, family.contract_id)
+        if variations:
+            for v in variations:
+                role = v["DOC_ROLE"].replace("_", " ").title()
+                date_bit = f", {v['EFFECTIVE_DATE']}" if v.get("EFFECTIVE_DATE") else ""
+                st.markdown(f"- **{v['FILE_NAME']}** ({role}{date_bit}): {v.get('NODE_SUMMARY') or '_not yet indexed_'}")
+        else:
+            st.caption("No variations, extensions, or novations are currently linked to this contract.")
+
+        st.markdown("**Commercial, Performance and Renewal Assessment**")
+        for key in contract_extraction.COMMERCIAL_ASSESSMENT_FIELDS:
+            _render_field(key)
+
+        st.markdown("**Consolidated Procurement Assessment**")
+        scorecard = (contract_row or {}).get("CLASSIFICATION_SCORECARD") or {}
+        if scorecard:
+            for key in contract_extraction.CLASSIFICATION_SCORECARD_FIELDS:
+                cols = st.columns([2, 3])
+                cols[0].markdown(f"**{contract_extraction.CLASSIFICATION_SCORECARD_LABELS[key]}**")
+                cols[1].write(scorecard.get(key) or "_Not yet generated._")
+        else:
+            st.caption("Not yet generated.")
+
+        st.markdown("**Recommended Actions**")
+        actions = (contract_row or {}).get("RECOMMENDED_ACTIONS") or []
+        if actions:
+            for action in actions:
+                st.markdown(f"- {action}")
+        else:
+            st.caption("No specific actions flagged.")

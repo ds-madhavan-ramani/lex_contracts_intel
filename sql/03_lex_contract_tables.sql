@@ -37,14 +37,20 @@ CREATE TABLE IF NOT EXISTS CONTRACT_REGISTER (
     CW_NUMBER          VARCHAR(50) NOT NULL UNIQUE,
     CONTRACT_TITLE      VARCHAR(500),
     STATUS               VARCHAR(20) DEFAULT 'ACTIVE',  -- ACTIVE | EXPIRED | SUPERSEDED
-    -- Longer-form narrative summary of the whole contract (a few sentences,
-    -- not the one-line CONTRACT_SUMMARY stock field) — synthesized from the
-    -- linked documents' own summaries plus the extracted stock fields once
-    -- extraction has run; see contract_extraction.generate_contract_overview.
-    -- Shown at the top of the Contract Lookup page and the downloadable PDF.
+    -- The template's "Executive Assessment" narrative (a few sentences),
+    -- synthesized from the extracted stock fields once extraction has run
+    -- — see contract_extraction.generate_contract_overview. Shown at the
+    -- top of the Contract Lookup page and the downloadable .docx summary.
     OVERVIEW_SUMMARY      VARCHAR(4000),
     OVERVIEW_GENERATED_AT  TIMESTAMP_NTZ,
-    CREATED_AT              TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+    -- The template's "Recommended Actions" bullet list (a JSON array of
+    -- strings) and "Consolidated Procurement Assessment" scorecard (a JSON
+    -- object keyed by contract_extraction.CLASSIFICATION_SCORECARD_FIELDS)
+    -- — both synthesized alongside OVERVIEW_SUMMARY, from the same
+    -- extracted stock fields, so all three stay consistent with each other.
+    RECOMMENDED_ACTIONS        VARIANT,
+    CLASSIFICATION_SCORECARD    VARIANT,
+    CREATED_AT                    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
 );
 
 -- Which physical documents (RAW_DOCUMENTS rows) make up a contract's

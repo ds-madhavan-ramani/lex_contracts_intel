@@ -214,3 +214,56 @@ def extract_column_values(raw_bytes: bytes, header_names) -> List[str]:
                     if i < len(row) and row[i]:
                         values.append(row[i].strip())
     return values
+
+
+def extract_row_records(raw_bytes: bytes, column_aliases: Dict[str, tuple]) -> List[Dict[str, Optional[str]]]:
+    """
+    Like extract_column_values, but reads several columns per row, keeping
+    them aligned — e.g. a register with both a CW number column and a
+    contract name column, where each output record should pair the two
+    values from the SAME row rather than two independent flat lists.
+
+    column_aliases: {canonical_key: (header_variant1, header_variant2, ...)}
+    — e.g. {"cw_number": ("CW Number", "Contract Workspace ID"),
+             "title": ("Contract Workspace Name",)}.
+
+    Returns one dict per non-blank data row, keyed by canonical_key ->
+    stripped cell value (a key is simply absent from a record if that
+    sheet's header didn't include it at all, so callers should use
+    .get(key) rather than assume every key is present). A row blank across
+    every matched column is skipped.
+    """
+    normalized_aliases = {key: {normalize_token(a) for a in aliases}
+                          for key, aliases in column_aliases.items()}
+    records: List[Dict[str, Optional[str]]] = []
+    with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+        shared = _load_shared_strings(zf)
+        for _, sheet_path in _load_sheets(zf).items():
+            rows = _parse_rows(zf, sheet_path, shared)
+            if not rows:
+                continue
+
+            header_row_idx, col_map = None, None
+            for r_idx, row in enumerate(rows[:_HEADER_SCAN_ROWS]):
+                found = {}
+                for i, h in enumerate(row):
+                    if not h:
+                        continue
+                    token = normalize_token(h)
+                    for key, aliases in normalized_aliases.items():
+                        if key not in found and token in aliases:
+                            found[key] = i
+                if found:
+                    header_row_idx, col_map = r_idx, found
+                    break
+            if header_row_idx is None:
+                continue
+
+            for row in rows[header_row_idx + 1:]:
+                record = {
+                    key: (row[idx].strip() if idx < len(row) and row[idx] else None)
+                    for key, idx in col_map.items()
+                }
+                if any(record.values()):
+                    records.append(record)
+    return records

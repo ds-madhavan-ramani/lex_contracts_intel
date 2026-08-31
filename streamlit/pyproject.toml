@@ -16,8 +16,9 @@ dependencies = [
     "streamlit[snowflake]==1.50.0",
     "requests",
     "pandas",
-    # Pure Python, no system dependencies (no wkhtmltopdf/headless browser
-    # to install on the compute pool) — used by pdf_report.py to build the
-    # downloadable Contract Summary PDF.
-    "fpdf2>=2.7.0",
+    # Pure Python, no system dependencies (no LibreOffice/Word install on
+    # the compute pool) — used by docx_report.py to fill in the team's own
+    # Contract Workspace Summary Template (assets/*.docx) with extracted
+    # values for the downloadable summary.
+    "python-docx>=1.1.0",
 ]

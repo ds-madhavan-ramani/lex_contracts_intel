@@ -17,7 +17,7 @@ from typing import List, Optional
 
 from config import ProjectConfig
 import contract_linking
-from ingestion.xlsx_parser import extract_column_values, list_headers
+from ingestion.xlsx_parser import extract_row_records, list_headers
 from utils.logging_utils import get_logger, log_event
 
 logger = get_logger(__name__)
@@ -25,8 +25,16 @@ logger = get_logger(__name__)
 # Column header variants accepted in the Required Contracts Register
 # workbook — matched case/spacing-insensitively the same way
 # xlsx_parser.normalize_token() already handles for other registers in
-# this template family.
-_CW_NUMBER_HEADERS = ("CW Number", "CWNumber", "Contract Number", "CW", "Contract No", "ContractNo")
+# this template family. Confirmed directly against the team's actual
+# MTM_CONTRACT_WORKSPACES.xlsx, which uses "CONTRACT_WORKSPACE_ID" /
+# "CONTRACT_WORKSPACE_NAME" — the other variants are kept as fallbacks in
+# case a future version of the register is headed differently.
+_REGISTER_COLUMN_ALIASES = {
+    "cw_number": ("CONTRACT_WORKSPACE_ID", "CW Number", "CWNumber", "Contract Number",
+                  "CW", "Contract No", "ContractNo"),
+    "title": ("CONTRACT_WORKSPACE_NAME", "Contract Workspace Name", "Contract Name",
+              "ContractName", "Title"),
+}
 
 # Only these extensions are ever offered/ingested as contract source
 # documents — the team has been explicit that contracts are PDF, rarely
@@ -71,28 +79,37 @@ class RequiredContractStatus:
 
 def sync_required_contracts_from_xlsx(session, project: ProjectConfig, raw_bytes: bytes) -> dict:
     """
-    Parses the Required Contracts Register workbook and upserts one
-    CONTRACT_REGISTER row per CW number found (title left NULL — filled in
-    once a document is linked and extracted). Idempotent: re-uploading the
-    same or an updated register only adds newly-appearing CW numbers,
-    never removes or duplicates existing ones — a contract dropping off a
-    later version of the register doesn't retroactively delete its
-    already-extracted history.
+    Parses the Required Contracts Register workbook (CW number + contract
+    name, paired per row) and upserts one CONTRACT_REGISTER row per CW
+    number found — with its title, when the register provides one, backfilled
+    onto an existing title-less row too (see contract_linking.get_or_create_
+    contract). Idempotent: re-uploading the same or an updated register only
+    adds newly-appearing CW numbers, never removes or duplicates existing
+    ones — a contract dropping off a later version of the register doesn't
+    retroactively delete its already-extracted history.
     """
-    raw_values = extract_column_values(raw_bytes, _CW_NUMBER_HEADERS)
-    # Normalize the way contract_linking's own suggestions are normalized
-    # (upper-case, no stray whitespace) so a register entry and an
-    # auto-suggested CW number from a document always compare equal.
-    cw_numbers = sorted({v.strip().upper() for v in raw_values if v and v.strip()})
+    records = extract_row_records(raw_bytes, _REGISTER_COLUMN_ALIASES)
+    # One entry per CW number (upper-cased/stripped, matching how
+    # contract_linking's own auto-suggestions are normalized, so a
+    # register entry and a document-derived suggestion always compare
+    # equal) — first non-blank title wins if a number somehow repeats.
+    by_cw_number: dict = {}
+    for rec in records:
+        cw_number = (rec.get("cw_number") or "").strip().upper()
+        if not cw_number:
+            continue
+        title = rec.get("title")
+        if cw_number not in by_cw_number or (title and not by_cw_number[cw_number]):
+            by_cw_number[cw_number] = title
 
-    if not cw_numbers:
+    if not by_cw_number:
         return {
             "added": [], "already_present": [],
             "headers_preview": list_headers(raw_bytes),
         }
 
     added, already_present = [], []
-    for cw_number in cw_numbers:
+    for cw_number, title in sorted(by_cw_number.items()):
         existing = session.sql(
             f"SELECT CONTRACT_ID FROM {project.qualified_schema}.CONTRACT_REGISTER WHERE CW_NUMBER = ?",
             params=[cw_number],
@@ -100,8 +117,10 @@ def sync_required_contracts_from_xlsx(session, project: ProjectConfig, raw_bytes
         if existing:
             already_present.append(cw_number)
         else:
-            contract_linking.get_or_create_contract(session, project, cw_number)
             added.append(cw_number)
+        # Runs either way — this is also what backfills a title onto an
+        # already-existing, title-less row (see get_or_create_contract).
+        contract_linking.get_or_create_contract(session, project, cw_number, contract_title=title)
 
     log_event(logger, "REQUIRED_CONTRACTS_SYNCED", project.project_code,
               added=len(added), already_present=len(already_present))
