@@ -1,0 +1,19 @@
+[project]
+name = "lex-app"
+requires-python = ">= 3.11"
+version = "0.0.1"
+description = ""
+dependencies = [
+    # Container runtime's minimum supported Streamlit version is 1.50 —
+    # warehouse runtime is capped at whatever Snowflake's Conda channel
+    # offers for this account. LEX runs on container runtime from the
+    # start (LEX_COMPUTE_POOL) rather than migrating to it later, since a
+    # modern Streamlit and predictable container resources both matter
+    # more here than for a small meeting-minutes deployment: 100-500 page
+    # OCR/indexing runs and up to ~600 documents at Scale phase. Pinned
+    # exactly (not a >= floor) to the specific version confirmed working
+    # on this account, avoiding resolver ambiguity.
+    "streamlit[snowflake]==1.50.0",
+    "requests",
+    "pandas",
+]
