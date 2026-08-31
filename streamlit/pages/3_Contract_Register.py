@@ -1,7 +1,11 @@
 """
-pages/3_Contract_Register.py — the 15 stock questions, answered and cited,
-per contract; and the UI for linking a contract's variations/extensions
-into one family.
+pages/3_Contract_Register.py — admin view: link a contract's documents
+(base + variations/extensions/novations) into one family, run/re-run
+extraction, and review/verify every extracted field with its citation.
+
+For the everyday "look up a contract number" experience, see Chat.py
+(the Contract Lookup landing page) — this page is for managing the
+linking/verification workflow behind it.
 
 LEX-specific: not part of the generic project-llm-wiki template this was
 forked from (see contract_linking.py / contract_extraction.py for the
@@ -17,6 +21,8 @@ import streamlit as st
 from snowflake_session import get_session
 import contract_linking
 import contract_extraction
+import required_contracts
+from citation_panel_ui import render_citation_panel
 
 st.set_page_config(page_title="Contract Register — LEX", page_icon="📋", layout="wide")
 
@@ -27,23 +33,7 @@ if "project" not in st.session_state:
 session = get_session()
 project = st.session_state["project"]
 
-FIELD_LABELS = {
-    "CONTRACT_TITLE": "Contract title",
-    "CW_NUMBER": "CW number",
-    "CONTRACT_END_DATE": "Contract end date",
-    "CONTRACT_SUMMARY": "One-sentence summary",
-    "NOVATION_CONSENT": "Novation clause — consent required?",
-    "DISCLOSURE_CLAUSE": "Disclosure clause",
-    "EXTENSION_OPTIONS": "Extension options",
-    "COMPLEXITY_GOODS_SERVICES": "Complexity of goods/services",
-    "SEPARABLE_PORTIONS": "Separable portions",
-    "PAYMENT_REGIME": "Payment regime",
-    "SECURITIES": "Securities",
-    "PRICE_REVIEW_MECHANISM": "Price review mechanism",
-    "EA_CLAUSES": "EA clauses",
-    "TERMINATION_CLAUSE": "Termination clause",
-    "AUTO_RENEWAL_MECHANISM": "Auto-renewal mechanism",
-}
+FIELD_LABELS = contract_extraction.FIELD_LABELS
 
 CONFIDENCE_BADGE = {
     "HIGH": "🟢 High",
@@ -55,7 +45,7 @@ CONFIDENCE_BADGE = {
 
 st.title(f"📋 Contract Register — {project.project_name}")
 st.caption(
-    "Every linked contract gets the same 15 stock questions answered "
+    "Every linked contract gets the same standard questions answered "
     "automatically, each with a citation back to the source document and "
     "a confidence badge. Review and tick **Verified** before relying on a "
     "field — \"not found in the documents\" is a valid, honest answer, "
@@ -71,21 +61,36 @@ with st.expander("🔗 Link documents to a contract", expanded=False):
         st.write(
             f"**{len(unlinked)}** ingested document(s) aren't linked to a contract yet — "
             "ingest happens on the Data Sources page; linking (below) is what groups a "
-            "base contract with its own variations/extensions/novations."
+            "base contract with its own variations/extensions/novations. Only contract "
+            "numbers already in the Required Contracts Register should normally be used "
+            "here — this text box also accepts a brand-new number if genuinely needed."
         )
+        required_cw_numbers = [r.cw_number for r in required_contracts.list_required_contracts_status(session, project)]
         existing_families = contract_linking.list_contract_families(session, project)
         existing_cw_numbers = [f.cw_number for f in existing_families]
 
+        OTHER_OPTION = "Other (type below)"
         for doc in unlinked:
             with st.container(border=True):
                 cols = st.columns([3, 2, 2, 2, 1])
                 cols[0].markdown(f"**{doc['file_name']}**")
-                cw_number = cols[1].text_input(
-                    "CW number", value=doc["suggested_cw_number"] or "",
-                    key=f"cw_{doc['doc_id']}",
-                    help="Auto-suggested from the file name/text where possible — "
-                         "always double-check before linking.",
+
+                suggested = (doc["suggested_cw_number"] or "").strip().upper()
+                choice_options = required_cw_numbers + [OTHER_OPTION]
+                default_choice = suggested if suggested in required_cw_numbers else OTHER_OPTION
+                cw_choice = cols[1].selectbox(
+                    "CW number", choice_options, index=choice_options.index(default_choice),
+                    key=f"cwselect_{doc['doc_id']}",
+                    help="Prefer a number already in the Required Contracts Register — "
+                         "auto-suggested from the file name/text where it matches one.",
                 )
+                if cw_choice == OTHER_OPTION:
+                    cw_number = cols[1].text_input(
+                        "Enter CW number", value=suggested, key=f"cw_{doc['doc_id']}"
+                    )
+                else:
+                    cw_number = cw_choice
+
                 doc_role = cols[2].selectbox(
                     "Role", contract_linking.DOC_ROLES, key=f"role_{doc['doc_id']}"
                 )
@@ -116,7 +121,7 @@ families = contract_linking.list_contract_families(session, project)
 top_col1, top_col2 = st.columns([3, 1])
 top_col1.subheader(f"Contracts ({len(families)})")
 if top_col2.button("Run extraction for all contracts", type="primary", disabled=not families):
-    with st.spinner(f"Running the 15 stock questions across {len(families)} contract(s)…"):
+    with st.spinner(f"Running the standard questions across {len(families)} contract(s)…"):
         contract_extraction.extract_stock_fields_for_all_contracts(session, project)
     st.success("Extraction complete.")
     st.rerun()
@@ -141,12 +146,17 @@ for family in families:
 
         if st.button("Run/refresh extraction for this contract",
                      key=f"extract_{family.contract_id}", type="primary"):
-            with st.spinner("Running the 15 stock questions…"):
+            with st.spinner("Running the standard questions…"):
                 contract_extraction.extract_stock_fields_for_contract(session, project, family.contract_id)
             st.success("Extraction complete.")
             st.rerun()
 
-        st.markdown("**Stock fields**")
+        contract_row = contract_linking.get_contract(session, project, family.contract_id)
+        if contract_row and contract_row.get("OVERVIEW_SUMMARY"):
+            st.markdown("**Overview**")
+            st.write(contract_row["OVERVIEW_SUMMARY"])
+
+        st.markdown("**Standard questions**")
         fields = contract_extraction.get_contract_fields(session, project, family.contract_id)
         for f in fields:
             field_key = f["FIELD_KEY"]
@@ -159,11 +169,9 @@ for family in families:
                 value = f.get("FIELD_VALUE")
                 st.write(value if value else "_Not yet extracted — run extraction above._")
 
-                source_name = f.get("SOURCE_FILE_NAME")
-                if source_name:
-                    source_url = f.get("SOURCE_URL")
-                    source_label = f"[{source_name}]({source_url})" if source_url else source_name
-                    st.caption(f"Source: {source_label}")
+                if value and f.get("SOURCE_DOC_ID"):
+                    with st.expander("View source"):
+                        render_citation_panel(session, project, f)
 
                 if value:
                     verified = st.checkbox(

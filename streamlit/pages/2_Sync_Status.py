@@ -1,8 +1,11 @@
 """
-pages/2_Sync_Status.py — ingestion/index counts and recent run history.
+pages/2_Sync_Status.py — ingestion/index counts, required-contracts
+coverage, and recent run history.
 
-Unchanged in mechanics from the project-llm-wiki template
-(ds-madhavan-ramani/org_mm_chat) — just LEX branding.
+Forked from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat).
+Difference from that template: adds the required-contracts coverage
+section — LEX's unit of progress is "how many of the required CW numbers
+are fully extracted", not just raw document/index counts.
 """
 
 import sys
@@ -13,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 import streamlit as st
 from snowflake_session import get_session
 from config import DATABASE, CATALOG_SCHEMA
+import required_contracts
 
 st.set_page_config(page_title="Sync Status — LEX", page_icon="📊", layout="wide")
 
@@ -26,6 +30,28 @@ schema = project.qualified_schema
 
 st.title(f"📊 Sync Status — {project.project_name}")
 
+st.subheader("Required contracts coverage")
+required = required_contracts.list_required_contracts_status(session, project)
+r_col1, r_col2, r_col3 = st.columns(3)
+extracted = sum(1 for r in required if r.extracted_field_count > 0)
+current = sum(1 for r in required if r.is_extraction_current)
+r_col1.metric("Required contracts", len(required))
+r_col2.metric("Extracted at least once", extracted)
+r_col3.metric("Extraction current", current)
+if required:
+    st.dataframe(
+        [{"CW Number": r.cw_number, "Title": r.contract_title or "",
+          "Linked documents": r.linked_document_count,
+          "Fields extracted": r.extracted_field_count,
+          "Extraction current": "✅" if r.is_extraction_current else ("—" if not r.extracted_field_count else "⚠️")}
+         for r in required],
+        use_container_width=True, hide_index=True,
+    )
+else:
+    st.info("No contracts in the Required Contracts Register yet — see Data Sources.")
+
+st.divider()
+st.subheader("Ingestion / indexing")
 col1, col2, col3 = st.columns(3)
 doc_count = session.sql(f"SELECT COUNT(*) AS C FROM {schema}.RAW_DOCUMENTS").collect()[0]["C"]
 indexed_count = session.sql(

@@ -16,4 +16,8 @@ dependencies = [
     "streamlit[snowflake]==1.50.0",
     "requests",
     "pandas",
+    # Pure Python, no system dependencies (no wkhtmltopdf/headless browser
+    # to install on the compute pool) — used by pdf_report.py to build the
+    # downloadable Contract Summary PDF.
+    "fpdf2>=2.7.0",
 ]

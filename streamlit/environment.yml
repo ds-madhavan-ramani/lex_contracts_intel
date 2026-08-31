@@ -13,3 +13,12 @@ dependencies:
   - streamlit=1.50.0
   - requests
   - pandas
+  # fpdf2 (PDF export) is deliberately NOT listed here — it's very unlikely
+  # to be resolvable from this account's Anaconda channel snapshot for
+  # warehouse-runtime Streamlit apps (the same class of failure openpyxl
+  # hit on the org_mm_chat project this was forked from, which is why that
+  # project's xlsx parsing was rewritten to stdlib-only rather than fixed
+  # here). Since LEX runs on container runtime by default anyway (see
+  # pyproject.toml), this is only a real gap if warehouse runtime is ever
+  # revisited — the PDF download button would need a fallback or removal
+  # in that case.

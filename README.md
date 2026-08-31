@@ -1,76 +1,91 @@
 # LEX — Legal EXtraction & Contract Intelligence
 
-**LEX** is a Streamlit-in-Snowflake chatbot, backed by Snowflake Cortex AI,
-for the MR5 Transition Contracts Team. It's built on `project-llm-wiki`, the
-same reusable multi-project LLM Wiki engine that runs
+**LEX** is a Streamlit-in-Snowflake tool, backed by Snowflake Cortex AI, for
+the MR5 Transition Contracts Team: enter a contract number, get its standard
+questions answered — instantly, from history, if already extracted — with a
+citation panel that opens the original document and highlights the exact
+passage an answer came from, and a one-click PDF summary. It's built on
+`project-llm-wiki`, the same reusable multi-project LLM Wiki engine that runs
 [`ORG_MM_CHAT`](https://github.com/ds-madhavan-ramani/org_mm_chat) in
-production — LEX is the second real project forked from it, extended with a
-contract-specific segmentation profile and an automated stock-question
-extraction layer neither the original template nor `ORG_MM_CHAT` needed.
+production — LEX is the second real project forked from it.
+
+> **Note on the published Plan/Architecture docs** (`LEX_Delivery_Plan.html`,
+> `LEX_Solution_Architecture.html`, linked at the bottom): they describe an
+> earlier design centered on a free-form chatbot. The team has since
+> confirmed there's no need for that — LEX is a contract-lookup-and-report
+> tool instead (this README and the code reflect that). Those two documents
+> are correct on the shared infrastructure (Snowflake account, security
+> perimeter, database/compute-pool isolation) but stale on the application
+> design; treat them as historical pending a refresh, not as the current
+> spec.
 
 ## What it does
 
-- **Source of truth**: Signed & Executed Contracts held on the team's
-  SharePoint / network-drive folder (a service-account-accessible Microsoft
-  Graph API source — confirm this is genuinely SharePoint and not a raw
-  file share before Build phase; see "Open items" below).
-- **Ingestion**: pulled from SharePoint via the Microsoft Graph API, or
-  uploaded directly, on demand from the app's Data Sources page.
-- **Retrieval**: not vector-chunked RAG. Each document is indexed into a
-  navigable tree (document → clause/schedule section, with LLM-generated
-  summaries), and questions are answered by having the model traverse that
-  tree — answers cite the exact source document, with hybrid vector search
-  layered on top since a 600-contract corpus needs more than summary-based
-  routing alone.
-- **The 15 stock questions**: contract title, CW number, end date,
-  one-sentence summary, novation consent, disclosure clause, extension
-  options, complexity of goods/services, separable portions, payment
-  regime, securities, price review mechanism, EA clauses, termination
-  clause, and auto-renewal mechanism — answered automatically for every
-  contract (and kept current as variations/extensions are linked in), each
-  with a citation and a confidence badge, on the **Contract Register**
-  page.
+- **The Required Contracts Register**: an .xlsx the team maintains, listing
+  every CW number LEX should have data for (2 today, growing toward 8 for
+  Build/validation, more later). Uploaded on the Data Sources page, it's
+  the authoritative source of which contract numbers exist — independent of
+  which documents happen to be ingested yet.
+- **Source documents**: signed/executed contracts, PDF (rarely DOCX) only,
+  held on the team's SharePoint/network-drive folder. A file whose name or
+  text doesn't show a marker like "Signed" or "Executed" is still ingested
+  but flagged for a human to double-check — never silently dropped.
+- **Contract Lookup** (the landing page): pick a contract number, and its
+  standard questions are answered from **history**
+  (`CONTRACT_FIELD_EXTRACTS`) instantly — nothing is re-parsed or
+  re-extracted on a page view. A document is only ever re-parsed if its
+  actual content (wording, dates, anything) changes; extraction is only
+  ever re-run explicitly, when a linked document has changed since the last
+  run.
+- **Citations with a highlighted original**: click "View source" next to
+  any answer and a side panel shows the exact cited passage (highlighted,
+  always exact — built from text stored verbatim at extraction time) plus,
+  for PDFs, the rendered original document with a best-effort highlight
+  over the matching text.
+- **Download as PDF**: a formatted one-page-per-contract summary — overview
+  plus every standard question, its answer, confidence, and source — via
+  `st.download_button`. The team will share example templates to match a
+  house style; the current layout is a plain default, not a final design.
 - **Contract families**: a signed contract is rarely one static document —
   its variations, extensions, and novation deeds are ingested as their own
-  documents, then linked together on the Contract Register page so both
-  chat and the stock-question extraction consider a contract's full
-  history, not just its base agreement.
-- **Chat UI**: free-form follow-up questions, with cited sources shown
-  under every answer and a cache layer so repeated questions don't re-run
-  the full search. No conversation memory yet (each question is answered
-  independently) — a deliberate v1 scope decision, not a gap; see the
-  Delivery Plan.
+  documents, then linked together on the Contract Register page so
+  extraction considers a contract's full history, not just its base
+  agreement.
+- **No chatbot**: the free-form retrieval engine (`query_engine.search()`)
+  still exists and is what the standard-question extraction runs on under
+  the hood, but there's no chat UI — the team doesn't need one right now.
 
 ## How it works
 
 ```
-SharePoint / network drive (Signed & Executed Contracts)
-        │  Microsoft Graph API
-        ▼
-RAW_DOCUMENTS  (LEXDB.DATA_LEX)
-   .xlsx → parsed natively (stdlib zipfile/XML, no third-party package)
-   .pdf/.docx/.txt → AI_PARSE_DOCUMENT (OCR)
-        │  index_builder.py (LEX_CONTRACT segmentation profile,
-        │  chunked for documents beyond MAX_DOCUMENT_CHARS — a 500-page
-        │  contract does not fit one indexing call)
-        ▼
-DOCUMENT_INDEX  — clause/schedule-level tree, each section with an LLM
-                  summary + (optionally) a semantic embedding
+Required Contracts Register (.xlsx)              SharePoint / network drive
+        │  which CW numbers are in scope          (signed/executed PDFs)
+        ▼                                                  │  Microsoft Graph API
+CONTRACT_REGISTER  ◄──────────────────────────────────────-┘
+   (LEXDB.DATA_LEX)        linked via CONTRACT_DOCUMENT_LINK
+        │                          │
+        │                          ▼
+        │                  RAW_DOCUMENTS — AI_PARSE_DOCUMENT (OCR), PDF/DOCX
+        │                  only, re-parsed only when content actually changes
+        │                          │  index_builder.py (LEX_CONTRACT profile,
+        │                          │  chunked for 100-500 page documents)
+        │                          ▼
+        │                  DOCUMENT_INDEX — clause/schedule-level tree
+        │                          │
+        │        contract_extraction.py: for each standard question, calls
+        │        query_engine.search() scoped to the contract's linked
+        │        documents (restrict_to_doc_ids) — same retrieval/citation
+        │        engine chat would use, just with no chat UI on top
+        ▼                          │
+CONTRACT_FIELD_EXTRACTS  ◄─────────┘
+  ("History") — answer, exact cited excerpt, a verified short highlight
+  phrase, confidence, per (contract, field)
         │
-        ├─ query_engine.py — tree search (doc → section routing, keyword
-        │  fallback, hybrid vector search, reranking), via Cortex
-        │  AI_COMPLETE — this IS the free-form Chat engine
-        │
-        └─ contract_extraction.py — the same query_engine.search(), called
-           once per stock question per contract family (via
-           restrict_to_doc_ids), persisted with citation + confidence into
-           CONTRACT_FIELD_EXTRACTS for the Contract Register page
+        ├─ Contract Lookup page: read straight from here, instant
+        ├─ citation_viewer.py + citation_panel_ui.py: presigned stage URL +
+        │  client-side PDF.js render, best-effort highlight of the phrase
+        └─ pdf_report.py: formats the same rows into a downloadable PDF
 ```
-
-`CONTRACT_REGISTER` + `CONTRACT_DOCUMENT_LINK` (which documents belong to
-which real-world contract, and in what role — base / variation / extension
-/ novation / deed of amendment) sit alongside `RAW_DOCUMENTS` /
-`DOCUMENT_INDEX` in the same schema; see `sql/03_lex_contract_tables.sql`.
 
 ## Project configuration
 
@@ -113,9 +128,13 @@ them.
    (`MEDSOCMS.APP_CATALOG.GRAPH_API_NETWORK_RULE`,
    `GRAPH_API_ACCESS_INTEGRATION`) — tenant-level, shared with every other
    project-llm-wiki project on this account, not created by this repo.
+5. `fpdf2` (PDF export) resolves via PyPI on container runtime — no extra
+   setup, but note it's deliberately **not** in `environment.yml` (would
+   likely be unresolvable on warehouse runtime's Conda channel; see that
+   file's own comment).
 
-Run `sql/test_graph_connectivity.sql` to confirm all three exist before
-deploying.
+Run `sql/test_graph_connectivity.sql` to confirm the three Graph API
+objects exist before deploying.
 
 ## Deploying / running
 
@@ -140,22 +159,29 @@ Snowflake Notebooks. In order, it:
 7. **Deploys the app** — stages `python/` and `streamlit/` (flattened to
    the stage root — see the notebook's own comments for why a nested
    `MAIN_FILE` doesn't work), and runs `CREATE OR REPLACE STREAMLIT`.
+8. **Schema migrations** — forward-only `ALTER TABLE ... ADD COLUMN IF NOT
+   EXISTS` for a LEX project that existed before a given column did (a
+   fresh provisioning run already has every column from step 4/5 above and
+   these are no-ops for it).
 
 Open the app: Snowsight → **Streamlit** → `LEX_APP`.
 
 ## Using the app
 
-- **Chat** — the default/landing page. Ask a question, get a cited answer.
-  No memory between questions yet.
-- **Data Sources** — upload files directly, or list and select from the
-  configured SharePoint/network-drive folder. Newly ingested or updated
-  documents are indexed automatically.
-- **Contract Register** — link a contract's documents (base + variations/
-  extensions/novations) into one family, then run the 15 stock questions
-  for it. Every field shows its citation and a confidence badge; tick
-  **Verified** once a human has checked it. "Not found in the documents"
-  is treated as a valid, honest answer — never a guess.
-- **Sync Status** — document/index counts and recent ingestion run history.
+- **Contract Lookup** (`Chat.py` — the filename is a holdover from the
+  template this was forked from; there's no chat feature) — the landing
+  page. Pick a contract number, see its overview and standard questions
+  answered from history, click **View source** on any answer to open the
+  citation panel, and **Download PDF** for a formatted summary.
+- **Data Sources** — three tabs: upload/sync the Required Contracts
+  Register workbook; ingest contract PDFs/DOCX (upload or SharePoint,
+  flagged if no signed/executed marker is found); manual index rebuild
+  (rarely needed — ingestion indexes automatically).
+- **Contract Register** — the admin view: link a contract's documents
+  (base + variations/extensions/novations) into one family, run/re-run
+  extraction, and review/verify every field with its citation.
+- **Sync Status** — required-contracts coverage (how many are extracted,
+  how many are current) plus raw ingestion/index counts and run history.
 
 ## Removing the project
 
@@ -183,34 +209,63 @@ What's actually new for LEX:
 |---|---|
 | `PROJECTS.DATA_DATABASE` (+ `CREATE_PROJECT`'s new parameter) | A project's data can now live in its own database (`LEXDB`), not just its own schema inside the shared `MEDSOCMS` |
 | `PROJECTS.GRAPH_TENANT_ID` / `GRAPH_CLIENT_ID` / `GRAPH_SECRET_NAME` | Optional per-project dedicated Graph API app registration, for least-privilege ingestion, instead of always the shared tenant-level app |
-| `LEX_CONTRACT` segmentation profile (`index_builder.py`) | Clause/schedule-aware sectioning for legal contracts, not generic prose or meeting-minutes sectioning |
-| Chunked indexing (`index_builder.py`) | A 100–500 page contract doesn't fit in one indexing call the way a few pages of meeting minutes does — see the function's own docstring |
-| `query_engine.search()`'s `restrict_to_doc_ids` parameter | Lets a caller scope search to one contract's linked documents — what makes the stock-field extraction just "chat with the document set pre-selected" |
-| `CONTRACT_REGISTER` / `CONTRACT_DOCUMENT_LINK` / `CONTRACT_FIELD_EXTRACTS` + `contract_linking.py` / `contract_extraction.py` | Contract-family linking and the automated, persisted, cited 15-stock-field extraction — nothing like this exists in the generic template |
-| **Contract Register** Streamlit page | New UI surface — nothing like it in `org_mm_chat` |
+| `LEX_CONTRACT` segmentation profile (`index_builder.py`) | Clause/schedule-aware sectioning for legal contracts |
+| Chunked indexing (`index_builder.py`) | A 100–500 page contract doesn't fit in one indexing call |
+| `query_engine.search()`'s `restrict_to_doc_ids` parameter | Scopes search to one contract's linked documents — what makes stock-field extraction just "search with the document set pre-selected" |
+| `required_contracts.py` + Required Contracts Register upload | The authoritative "which CW numbers are in scope" list, seeded from an .xlsx, independent of what's been ingested |
+| `contract_linking.py` / `contract_extraction.py` + `CONTRACT_REGISTER` / `CONTRACT_DOCUMENT_LINK` / `CONTRACT_FIELD_EXTRACTS` | Contract-family linking and the automated, persisted, cited standard-question extraction ("History") |
+| `CONTRACT_FIELD_EXTRACTS.HIGHLIGHT_PHRASE` + `contract_extraction._extract_highlight_phrase` | A short exact quote, verified as a real substring, for the citation viewer to highlight |
+| `CONTRACT_REGISTER.OVERVIEW_SUMMARY` + `contract_extraction.generate_contract_overview` | The longer-form contract overview shown on Contract Lookup and in the PDF |
+| `citation_viewer.py` / `citation_panel_ui.py` | Presigned stage URLs + a hand-rolled client-side PDF.js viewer that best-effort highlights the cited passage in the original document |
+| `pdf_report.py` | The downloadable Contract Summary PDF (`fpdf2`) |
+| **Contract Lookup** page (`Chat.py`, repurposed) | The primary end-user surface — enter a contract number, get history, cite, export |
+| **Contract Register** page | Admin: linking + verification workflow |
+
+## Known limitations / unverified in this environment
+
+Built and syntax-checked (all modules byte-compile and pass `pyflakes`;
+`pdf_report.py` was smoke-tested locally against a real `fpdf2` install,
+which caught and fixed two real bugs — `core_fonts_encoding` and
+`multi_cell`'s cursor-position default), but **not** run against a live
+Snowflake account from this environment:
+
+- The PDF.js-based citation highlighting in `citation_viewer.py` is
+  genuinely best-effort (OCR text doesn't always align character-for-
+  character with the rendered page, and only horizontal/non-rotated text
+  is handled) and has not been exercised in a real browser. The exact
+  cited passage is always shown correctly as plain text regardless — only
+  the highlight overlay on the rendered PDF is approximate.
+- Whether Streamlit-in-Snowflake's Content-Security-Policy permits an
+  embedded `components.v1.html` iframe to load a script from cdnjs is
+  unverified — if blocked, the viewer's status line reports the failure
+  and the always-working "Open in new tab" link (plain navigation, not a
+  script) still gets the user to the source document.
+- `GET_PRESIGNED_URL`'s stage argument is inlined as a literal (not a bind
+  parameter) in `citation_viewer.py`, following the same pattern this
+  codebase already confirmed is required for `BUILD_SCOPED_FILE_URL` —
+  reasoned by analogy, not independently confirmed for this specific
+  function.
 
 ## Open items
-
-Carried over from the Delivery Plan's open questions — resolve these
-before Build phase runs on real signed contracts:
 
 1. Confirm the "network drive" is actually a SharePoint library reachable
    via Graph API (assumed throughout this repo) — a raw file share needs a
    different ingestion bridge.
 2. The 3–5 named users for the `LEX_USERS` role.
-3. Whatever identifies the BG/Cash securities-reconciliation list, for a
+3. The team's example question/summary template — `contract_extraction
+   .STOCK_FIELDS` currently has 15 questions; the team has said 16-20 is
+   the real target.
+4. Whatever identifies the BG/Cash securities-reconciliation list, for a
    future `SECURITIES_RECONCILIATION` view.
-4. The existing CW-number formatting convention, so
+5. The existing CW-number formatting convention, so
    `contract_linking.suggest_cw_number()`'s auto-suggestion is reliable.
-5. Confirmation that Cortex cross-region inference (to AWS AU) is
+6. Confirmation that Cortex cross-region inference (to AWS AU) is
    acceptable for signed contract content, from a data-handling/compliance
    standpoint.
 
 ## Further reading
 
 - **[LEX_Delivery_Plan.html](./LEX_Delivery_Plan.html)** ([published version](https://claude.ai/code/artifact/62475db9-d82d-41a0-b66e-1f85f2efbf4d))
-  — full scope, architecture rationale, security/access design, and the
-  phased Build (8 contracts) → Scale (600 contracts) execution roadmap.
-- **[LEX_Solution_Architecture.html](./LEX_Solution_Architecture.html)** ([published version](https://claude.ai/code/artifact/ef0664c5-268e-42b8-ab4e-553e9cbb785d))
-  — the contextual block-diagram architecture: users, Streamlit-in-
-  Snowflake, the security perimeter, and cross-region Cortex inference.
+  and **[LEX_Solution_Architecture.html](./LEX_Solution_Architecture.html)** ([published version](https://claude.ai/code/artifact/ef0664c5-268e-42b8-ab4e-553e9cbb785d))
+  — infrastructure/security design, still current; application design is
+  superseded by this README (see the note at the top).

@@ -259,12 +259,18 @@ Return ONLY JSON: {{"node_ids": [1, 2]}}"""
 
     context_chunks = []
     node_id_by_name = {}
+    excerpt_by_name = {}
     for s in selected:
         start_off, end_off = (int(x) for x in s["NODE_TEXT_REF"].split(":"))
         excerpt = s["RAW_TEXT"][start_off:end_off][: project.max_section_chars]
         n = doc_numbers[s["FILE_NAME"]]
         context_chunks.append(f"[{n}] {s['FILE_NAME']} — {s['NODE_TITLE']}\n{excerpt}")
+        # First (lowest node_id) section per document wins for node_id/
+        # excerpt — matches doc_numbers/doc_urls' own "first one seen"
+        # convention below, and is what contract_extraction.py stores as
+        # CONTRACT_FIELD_EXTRACTS.SOURCE_QUOTE for the citation viewer.
         node_id_by_name.setdefault(s["FILE_NAME"], s["NODE_ID"])
+        excerpt_by_name.setdefault(s["FILE_NAME"], excerpt)
 
     synthesis_prompt = f"""Answer the question using ONLY the excerpts below.
 Write in a concise, professional tone, as if briefing a contracts manager —
@@ -292,6 +298,7 @@ EXCERPTS:
             "url": doc_urls[name],
             "doc_id": doc_id_by_name[name],
             "node_id": node_id_by_name[name],
+            "excerpt": excerpt_by_name[name],
         }
         for name in file_names_sorted
     ]

@@ -1,9 +1,17 @@
 """
-streamlit/Chat.py — entry point AND the chat UI itself.
+streamlit/Chat.py — entry point AND the Contract Lookup UI itself.
 
-Forked from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat).
+Filename kept as Chat.py purely so pipeline/00_provision_project.ipynb's
+`MAIN_FILE = 'Chat.py'` deploy setting doesn't need to change — there is no
+chat feature here. Enter/select a contract number and get its standard
+questions answered from History (CONTRACT_FIELD_EXTRACTS), with a citation
+panel on the side and a PDF export — the free-form question-answering
+engine this was originally built around (query_engine.search()) is not a
+user-facing feature right now; it's still what contract_extraction.py runs
+under the hood.
+
 This deployment is dedicated to one project (LEX) — a separate "select a
-project" landing screen before you can even see the chat isn't useful for
+project" landing screen before you can even see this page isn't useful for
 a single-purpose app, so this page loads the project directly and *is* the
 default view. If the catalog ever holds more than one active project, a
 picker still appears — it just isn't the app's front door.
@@ -17,9 +25,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "python"))
 import streamlit as st
 from snowflake_session import get_session
 from config import load_project, list_active_projects
-from query_engine import search
+import contract_linking
+import contract_extraction
+import required_contracts
+from citation_panel_ui import render_citation_panel
+from pdf_report import build_contract_pdf
 
-st.set_page_config(page_title="Chat — LEX", page_icon="⚖️", layout="wide")
+st.set_page_config(page_title="Contract Lookup — LEX", page_icon="⚖️", layout="wide")
 
 session = get_session()
 
@@ -50,71 +62,128 @@ project = st.session_state["project"]
 
 st.sidebar.divider()
 
-st.title(f"💬 {project.project_name}")
-if project.description:
-    st.caption(project.description)
+st.title(f"🔍 Contract Lookup — {project.project_name}")
 st.caption(
-    "This assistant doesn't remember earlier questions in this session yet — "
-    "each question is answered independently. For the 15 stock questions "
-    "answered automatically per contract, see the **Contract Register** page."
+    "Enter a contract number to see its standard questions answered, with "
+    "citations back to the original document. Answers already extracted "
+    "are served instantly from history — nothing is re-parsed or "
+    "re-extracted unless the source document has actually changed."
 )
 
-# Streamlit < 1.24 has neither st.chat_input nor st.chat_message — fall
-# back to plain widgets so this page still works regardless of the actual
-# runtime version. LEX runs on container runtime by default (a modern,
-# pinned Streamlit version — see pyproject.toml), so this fallback should
-# never actually trigger, but it's cheap insurance if this project is ever
-# run on warehouse runtime instead.
-_HAS_CHAT_UI = hasattr(st, "chat_input") and hasattr(st, "chat_message")
+required = required_contracts.list_required_contracts_status(session, project)
+if not required:
+    st.info(
+        "No contracts in the Required Contracts Register yet. Go to **Data "
+        "Sources** to upload the register workbook, then come back here."
+    )
+    st.stop()
 
 
-def _render_message(role: str, content: str, cited_docs=None, from_cache: bool = False):
-    ctx = st.chat_message(role) if _HAS_CHAT_UI else st.container()
-    with ctx:
-        if not _HAS_CHAT_UI:
-            st.markdown(f"**{'You' if role == 'user' else 'Assistant'}:**")
-        st.markdown(content)
-        if cited_docs:
-            with st.expander(f"Sources ({len(cited_docs)})"):
-                for doc in cited_docs:
-                    if isinstance(doc, dict):
-                        n = doc.get("number", "")
-                        name = doc.get("file_name", "")
-                        url = doc.get("url")
-                        st.markdown(f"{n}. [{name}]({url})" if url else f"{n}. {name}")
-                    else:
-                        # Older cached rows stored cited_docs as plain
-                        # filename strings, before citations gained
-                        # numbers/URLs — render those the old way.
-                        st.write(f"- {doc}")
-        if from_cache:
-            st.caption("⚡ Answered from cache")
+def _option_label(r) -> str:
+    if r.linked_document_count == 0:
+        state = "not yet ingested"
+    elif r.extracted_field_count == 0:
+        state = f"{r.linked_document_count} doc(s), not yet extracted"
+    elif not r.is_extraction_current:
+        state = f"{r.linked_document_count} doc(s), documents changed since extraction"
+    else:
+        state = f"{r.linked_document_count} doc(s), extracted"
+    title_bit = f" — {r.contract_title}" if r.contract_title else ""
+    return f"{r.cw_number}{title_bit}  ·  {state}"
 
 
-if "messages" not in st.session_state:
-    st.session_state["messages"] = []
+options = {_option_label(r): r for r in required}
+selected_label = st.selectbox("Contract number", list(options.keys()))
+status = options[selected_label]
 
-for msg in st.session_state["messages"]:
-    _render_message(msg["role"], msg["content"], msg.get("cited_docs"))
+st.divider()
 
-if _HAS_CHAT_UI:
-    question = st.chat_input("Ask a question about this project's contracts…")
+if status.linked_document_count == 0:
+    st.warning(
+        f"**{status.cw_number}** has no documents linked yet. Ingest its signed/executed "
+        "contract on the **Data Sources** page, then link it to this contract number on "
+        "the **Contract Register** page."
+    )
+    st.stop()
+
+if status.extracted_field_count == 0:
+    st.info(f"**{status.cw_number}** has linked documents but hasn't been extracted yet.")
+    if st.button("Run extraction now", type="primary"):
+        with st.spinner("Answering the standard questions…"):
+            contract_extraction.extract_stock_fields_for_contract(session, project, status.contract_id)
+        st.rerun()
+    st.stop()
+
+if not status.is_extraction_current:
+    st.warning(
+        f"A linked document for **{status.cw_number}** has changed since this was last "
+        "extracted — the answers below may be out of date."
+    )
+    if st.button("Re-run extraction", type="primary"):
+        with st.spinner("Re-answering the standard questions…"):
+            contract_extraction.extract_stock_fields_for_contract(session, project, status.contract_id)
+        st.rerun()
+
+contract = contract_linking.get_contract(session, project, status.contract_id)
+fields = contract_extraction.get_contract_fields(session, project, status.contract_id)
+
+header_col, action_col = st.columns([4, 1])
+header_col.subheader(f"{contract['CW_NUMBER']}" + (f" — {contract['CONTRACT_TITLE']}" if contract['CONTRACT_TITLE'] else ""))
+
+pdf_bytes = build_contract_pdf(
+    cw_number=contract["CW_NUMBER"],
+    contract_title=contract["CONTRACT_TITLE"],
+    overview=contract["OVERVIEW_SUMMARY"],
+    fields=fields,
+    field_labels=contract_extraction.FIELD_LABELS,
+)
+action_col.download_button(
+    "⬇ Download PDF", data=pdf_bytes,
+    file_name=f"{contract['CW_NUMBER']}_summary.pdf", mime="application/pdf",
+)
+
+if contract["OVERVIEW_SUMMARY"]:
+    st.markdown("### Overview")
+    st.write(contract["OVERVIEW_SUMMARY"])
 else:
-    with st.form("chat_form", clear_on_submit=True):
-        question_input = st.text_input("Ask a question about this project's contracts…")
-        asked = st.form_submit_button("Ask")
-    question = question_input if asked and question_input else None
+    st.caption("Overview not yet generated.")
 
-if question:
-    st.session_state["messages"].append({"role": "user", "content": question})
-    _render_message("user", question)
+st.markdown("### Standard questions")
 
-    with st.spinner("Searching…"):
-        result = search(session, project, question)
-    _render_message("assistant", result.answer, result.cited_docs, result.from_cache)
+CONFIDENCE_BADGE = {
+    "HIGH": "🟢 High",
+    "MEDIUM": "🟡 Medium",
+    "LOW": "🟠 Low — worth a look",
+    "NOT_FOUND": "🔴 Not found in the documents",
+    None: "⚪ Not yet extracted",
+}
 
-    st.session_state["messages"].append({
-        "role": "assistant",
-        "content": result.answer,
-        "cited_docs": result.cited_docs,
-    })
+if "active_field" not in st.session_state:
+    st.session_state["active_field"] = None
+
+list_col, panel_col = st.columns([3, 2])
+
+with list_col:
+    for f in fields:
+        field_key = f["FIELD_KEY"]
+        with st.container(border=True):
+            st.markdown(f"**{contract_extraction.FIELD_LABELS.get(field_key, field_key)}**")
+            st.write(f["FIELD_VALUE"] or "_Not yet extracted._")
+            badge_col, btn_col = st.columns([3, 1])
+            badge_col.caption(
+                CONFIDENCE_BADGE.get(f.get("CONFIDENCE"), f.get("CONFIDENCE") or "⚪ Not yet extracted")
+                + (" · Verified" if f.get("IS_VERIFIED") else "")
+            )
+            if f.get("FIELD_VALUE") and f.get("SOURCE_DOC_ID"):
+                if btn_col.button("View source", key=f"src_{field_key}"):
+                    st.session_state["active_field"] = field_key
+
+with panel_col:
+    st.markdown("#### Cited passage")
+    active_key = st.session_state.get("active_field")
+    if not active_key:
+        st.caption("Click **View source** next to any answer to see the exact passage it's drawn from.")
+    else:
+        active_field = next((f for f in fields if f["FIELD_KEY"] == active_key), None)
+        if active_field:
+            render_citation_panel(session, project, active_field)

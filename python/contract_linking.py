@@ -124,6 +124,20 @@ def unlink_document(session, project: ProjectConfig, contract_id: int, doc_id: i
     ).collect()
 
 
+def get_contract(session, project: ProjectConfig, contract_id: int) -> Optional[dict]:
+    """One contract's own register row (CW number, title, lifecycle
+    status, and the longer-form OVERVIEW_SUMMARY contract_extraction.py
+    generates) — the Contract Lookup page's header reads this directly."""
+    schema = project.qualified_schema
+    rows = session.sql(
+        f"""SELECT CONTRACT_ID, CW_NUMBER, CONTRACT_TITLE, STATUS,
+                   OVERVIEW_SUMMARY, OVERVIEW_GENERATED_AT
+            FROM {schema}.CONTRACT_REGISTER WHERE CONTRACT_ID = ?""",
+        params=[contract_id],
+    ).collect()
+    return dict(rows[0].as_dict()) if rows else None
+
+
 def list_contract_families(session, project: ProjectConfig) -> List[ContractSummary]:
     schema = project.qualified_schema
     rows = session.sql(
