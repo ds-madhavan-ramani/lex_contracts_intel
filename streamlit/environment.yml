@@ -4,8 +4,8 @@ channels:
 dependencies:
   # Inert on warehouse runtime: it defaults to whatever Streamlit version
   # Snowflake's Conda channel ships for this account regardless of what's
-  # pinned here (confirmed on the org_mm_chat project this was forked
-  # from — not overridable even after a redeploy). LEX runs on container
+  # pinned here (confirmed on this template's own reference deployment —
+  # not overridable even after a redeploy). LEX runs on container
   # runtime instead (see pyproject.toml), which does respect its
   # manifest's version pin. Kept in sync with pyproject.toml/
   # requirements.txt (1.50.0) purely so all three manifests state the same
@@ -16,8 +16,8 @@ dependencies:
   # python-docx (the Contract Summary export) is deliberately NOT listed
   # here — it's very unlikely to be resolvable from this account's Anaconda
   # channel snapshot for warehouse-runtime Streamlit apps (the same class
-  # of failure openpyxl hit on the org_mm_chat project this was forked
-  # from, which is why that project's xlsx parsing was rewritten to
+  # of failure openpyxl hit in this template's own reference deployment,
+  # which is why xlsx parsing there was rewritten to
   # stdlib-only rather than fixed here). Since LEX runs on container
   # runtime by default anyway (see pyproject.toml), this is only a real
   # gap if warehouse runtime is ever revisited — the summary download

@@ -1,7 +1,7 @@
 """
 graph_client.py — generalized Microsoft Graph API client for SharePoint.
 
-Unchanged from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat).
+Unchanged from the project-llm-wiki template.
 Does one generic thing well: given ANY SharePoint folder URL, resolve it to
 a Graph drive/item and list its files (optionally recursive). Takes
 tenant_id/client_id as plain parameters rather than importing them itself,

@@ -2,9 +2,9 @@
 -- LEX : test_graph_connectivity.sql
 -- Run once after setup to confirm the External Access Integration works.
 --
--- Unlike ocms-llm-wiki/org_mm_chat (which reuse one tenant-level Graph app
--- registration for every project), LEX defaults to that SAME shared,
--- tenant-level app registration too — GRAPH_TENANT_ID/GRAPH_CLIENT_ID in
+-- Like every other project on this shared project-llm-wiki template, LEX
+-- defaults to reusing one tenant-level Graph app registration too —
+-- GRAPH_TENANT_ID/GRAPH_CLIENT_ID in
 -- python/config.py, secret MEDSOCMS.APP_CATALOG.GRAPH_API_SECRET — unless
 -- and until a dedicated app registration is provisioned for LEX (see the
 -- README's security notes). If/when a dedicated registration exists, set

@@ -1,7 +1,7 @@
 """
 file_ingest.py — ingest user-uploaded files into RAW_DOCUMENTS.
 
-Unchanged from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat).
+Unchanged from the project-llm-wiki template.
 This is the "no mandatory pre-step" path: a user drops files straight into
 the Streamlit Data Sources page and this runs synchronously (slower per file
 than a batch job, but nothing needs to exist before the app is usable).

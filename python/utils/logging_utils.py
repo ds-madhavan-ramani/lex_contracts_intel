@@ -1,5 +1,5 @@
 """logging_utils.py — structured stdout logging. Unchanged from the
-project-llm-wiki template (ds-madhavan-ramani/org_mm_chat)."""
+project-llm-wiki template."""
 
 import logging
 import sys

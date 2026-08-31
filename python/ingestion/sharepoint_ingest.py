@@ -6,9 +6,9 @@ from the Streamlit Data Sources page:
   1. list_sharepoint_folder(folder_url)   -> [DriveItem, ...] for checkboxes
   2. ingest_selected_files(project, items) -> [IngestResult, ...]
 
-Forked from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat).
-Difference from that template: this drops org_mm_chat's ORG-specific
-"BIS_ORG_Meeting_Minutes register" file-selection logic — that was a
+Forked from the project-llm-wiki template.
+Difference from that template: this drops the template's original
+ORG-specific "BIS_ORG_Meeting_Minutes register" file-selection logic — that was a
 business rule for one project's meeting-minutes register, not something a
 contracts library has an equivalent of. LEX just lists a folder and lets
 the user tick what they want, matching the template's own stated generic

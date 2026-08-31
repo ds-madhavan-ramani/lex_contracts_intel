@@ -2,7 +2,7 @@
 index_builder.py — builds the hierarchical DOCUMENT_INDEX tree for newly
 ingested documents.
 
-Forked from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat),
+Forked from the project-llm-wiki template,
 which keys the prompt off ProjectConfig.segmentation_profile so a new
 project either reuses 'GENERIC' or adds a specialized entry to PROMPTS
 without touching the calling code — this file adds 'LEX_CONTRACT' as one
@@ -78,7 +78,7 @@ DOCUMENT TEXT:
 
     # LEX's segmentation profile: contracts are clause/schedule-structured
     # legal text, not prose with generic topic breaks (GENERIC) or dated
-    # meetings (the org_mm_chat template's ORG_MEETING_MINUTES profile,
+    # meetings (the template's original ORG_MEETING_MINUTES profile,
     # not carried over here — it doesn't apply to this project's content).
     "LEX_CONTRACT": """You are indexing a signed contract (or one of its
 variations, extensions, or novation deeds) into a navigable tree structure.

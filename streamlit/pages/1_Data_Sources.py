@@ -4,10 +4,11 @@ Contracts Register workbook that tells LEX which CW numbers are in scope,
 (2) ingest the actual signed/executed contract PDFs (rarely DOCX) for
 those contracts, and (3) the manual index-rebuild fallback.
 
-Forked from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat).
+Forked from the project-llm-wiki template.
 Differences from that template: no register-workbook file-*selection*
-logic (org_mm_chat's BIS_ORG_Meeting_Minutes register picked one canonical
-file per meeting out of several candidates — not this project's problem);
+logic (the template's original BIS_ORG_Meeting_Minutes register picked one
+canonical file per meeting out of several candidates — not this project's
+problem);
 instead, LEX's own Required Contracts Register (a much simpler workbook —
 just a list of CW numbers) drives *which contract numbers exist* in
 CONTRACT_REGISTER at all, separately from which documents happen to sit in

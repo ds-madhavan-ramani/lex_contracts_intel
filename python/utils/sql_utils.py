@@ -1,7 +1,7 @@
 """
 sql_utils.py — parameterized query helpers.
 
-Unchanged from the project-llm-wiki template (ds-madhavan-ramani/org_mm_chat).
+Unchanged from the project-llm-wiki template.
 Security hardening: never build SQL by string-concatenating user input.
 Schema/table names below come from config.ProjectConfig (developer-
 controlled, never user input); the values that vary by request always go

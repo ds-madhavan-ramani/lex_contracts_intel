@@ -7,9 +7,8 @@ out exactly like the team's own **Contract Workspace Summary Template**,
 with a citation panel that opens the original document and highlights the
 exact passage an answer came from, and a one-click download of the summary
 as a matching .docx. It's built on `project-llm-wiki`, the same reusable
-multi-project LLM Wiki engine that runs
-[`ORG_MM_CHAT`](https://github.com/ds-madhavan-ramani/org_mm_chat) in
-production — LEX is the second real project forked from it.
+multi-project LLM Wiki engine that already runs other projects in
+production on this account — LEX is a project instance forked from it.
 
 > **Note on the published Plan/Architecture docs** (`LEX_Delivery_Plan.html`,
 > `LEX_Solution_Architecture.html`, linked at the bottom): they describe an
@@ -150,6 +149,18 @@ These are all set in `pipeline/00_provision_project.ipynb`'s project-creation
 cell — see that notebook for the full, current values and how to change
 them.
 
+`MEDSOCMS` still appears above and throughout the notebook/SQL — that's not
+a leftover from before `MEDSCOMA` existed. `MEDSOCMS.APP_CATALOG` is the one
+shared catalog schema every project-llm-wiki project registers into
+(`PROJECTS`, `PROJECT_SYNC_LOG`, `PROJECT_QUERY_LOG`, the Graph API secret,
+and — by the same cross-project convention — every project's Streamlit
+app/stage objects), so LEX keeps using it for exactly that bookkeeping.
+Only LEX's actual data (`RAW_DOCUMENTS`, `DOCUMENT_INDEX`, `CONTRACT_
+REGISTER`, and the rest) is isolated in `MEDSCOMA.DATA_LEX` instead of a
+schema inside `MEDSOCMS`. If you'd rather the Streamlit app/stage objects
+also live under `MEDSCOMA` instead of the shared catalog, that's a small
+change to the deploy cell — flag it and it can be made.
+
 ## Prerequisites
 
 1. Snowflake access to the `ADVANCEDANALYTICS` role and `MTMWH02` warehouse.
@@ -159,7 +170,7 @@ them.
    can't.
 3. A Microsoft Graph API app registration with `Sites.Selected` permission
    granted on the contracts library. LEX defaults to reusing the same
-   shared, tenant-level app registration `ORG_MM_CHAT` uses
+   shared, tenant-level app registration every project-llm-wiki project uses
    (`GRAPH_TENANT_ID`/`GRAPH_CLIENT_ID` in `python/config.py`, secret
    `MEDSOCMS.APP_CATALOG.GRAPH_API_SECRET`) — see `sql/test_graph_
    connectivity.sql` for how to give LEX its own dedicated, least-privilege
@@ -183,8 +194,8 @@ Snowflake Notebooks. In order, it:
 
 1. **Connects** to Snowflake.
 2. **Sets up the shared catalog** (`MEDSOCMS.APP_CATALOG`) — skip if it
-   already exists (it does, if `ORG_MM_CHAT` is already provisioned on this
-   account).
+   already exists (it does, if another project-llm-wiki project is already
+   provisioned on this account).
 3. **Creates `MEDSCOMA` + `STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT`** — prints clear next steps if the
    current role can't (see Prerequisites above).
 4. **Creates the LEX project** — `MEDSCOMA.DATA_LEX` schema/stage, registered
@@ -243,11 +254,9 @@ objects.
 The bulk of this repo — `sql/00_setup_catalog.sql`'s `PROJECTS` catalog and
 `CREATE_PROJECT`/`TEARDOWN_PROJECT` procs, `python/query_engine.py`'s tree
 search, the ingestion pipeline, the Streamlit deploy pattern — is the
-`project-llm-wiki` engine forked from
-[`ds-madhavan-ramani/org_mm_chat`](https://github.com/ds-madhavan-ramani/org_mm_chat),
-carrying forward that project's hard-won lessons on Streamlit-in-Snowflake
-deployment quirks, Cortex JSON-parsing robustness, and citation plumbing.
-What's actually new for LEX:
+`project-llm-wiki` engine, carrying forward that template's hard-won
+lessons on Streamlit-in-Snowflake deployment quirks, Cortex JSON-parsing
+robustness, and citation plumbing. What's actually new for LEX:
 
 | New | Why |
 |---|---|
