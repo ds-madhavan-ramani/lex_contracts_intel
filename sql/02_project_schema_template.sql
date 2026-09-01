@@ -23,12 +23,13 @@ CREATE TABLE IF NOT EXISTS RAW_DOCUMENTS (
     DOC_ID              INT IDENTITY PRIMARY KEY,
     FILE_NAME             VARCHAR(500) NOT NULL,
     STAGE_PATH             VARCHAR(1000) NOT NULL,
-    SOURCE_TYPE             VARCHAR(20) NOT NULL,      -- 'UPLOAD' | 'SHAREPOINT'
-    SHAREPOINT_ITEM_ID       VARCHAR(200),               -- dedup key for SharePoint-sourced docs
+    SOURCE_TYPE             VARCHAR(20) NOT NULL,      -- 'UPLOAD' | 'NETWORK_DRIVE'
+    SOURCE_ITEM_ID           VARCHAR(1000),              -- dedup key (network drive UNC path), NULL for uploads
     DOCUMENT_DATE               DATE,
     RAW_TEXT                     VARCHAR(16777216),
     SOURCE_HASH                   VARCHAR(64),
-    SOURCE_URL                     VARCHAR(2000),           -- SharePoint webUrl, NULL for uploads
+    SOURCE_URL                     VARCHAR(2000),           -- external web link, if any — NULL for
+                                                             -- network-drive/upload sources
     PARSED_AT                      TIMESTAMP_NTZ,
     CREATED_AT                      TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
 );

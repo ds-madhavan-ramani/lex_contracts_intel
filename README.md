@@ -12,13 +12,15 @@ production on this account — LEX is a project instance forked from it.
 
 > **Note on the published Plan/Architecture docs** (`LEX_Delivery_Plan.html`,
 > `LEX_Solution_Architecture.html`, linked at the bottom): they describe an
-> earlier design centered on a free-form chatbot, and an earlier
-> infrastructure plan where LEX's catalog bookkeeping stayed in a database
-> shared with other project-llm-wiki projects. Both have since changed —
-> LEX is a contract-lookup-and-report tool instead of a chatbot, and it now
-> runs fully self-contained (its own database, catalog, Graph API
-> registration, and compute pool, with no shared resources at all; this
-> README and the code reflect both changes). Treat those two documents as
+> earlier design centered on a free-form chatbot, an earlier infrastructure
+> plan where LEX's catalog bookkeeping stayed in a database shared with
+> other project-llm-wiki projects, and an assumed SharePoint/Graph API
+> ingestion path. All three have since changed — LEX is a
+> contract-lookup-and-report tool instead of a chatbot, it now runs fully
+> self-contained (its own database, catalog, credentials, and compute pool,
+> with no shared resources at all), and its contracts library was confirmed
+> to be a genuine on-prem network drive (SMB), not SharePoint — this README
+> and the code reflect all three changes. Treat those two documents as
 > historical pending a refresh, not as the current spec.
 
 ## What it does
@@ -32,9 +34,10 @@ production on this account — LEX is a project instance forked from it.
   which documents happen to be ingested yet — and seeds each contract's
   title too.
 - **Source documents**: signed/executed contracts, PDF (rarely DOCX) only,
-  held on the team's SharePoint/network-drive folder. A file whose name or
-  text doesn't show a marker like "Signed" or "Executed" is still ingested
-  but flagged for a human to double-check — never silently dropped.
+  held on the team's network drive — a genuine on-prem SMB file share,
+  confirmed not SharePoint. A file whose name or text doesn't show a
+  marker like "Signed" or "Executed" is still ingested but flagged for a
+  human to double-check — never silently dropped.
 - **Contract Lookup** (the landing page): pick a contract number, and its
   standard questions are answered from **history**
   (`CONTRACT_FIELD_EXTRACTS`) instantly — nothing is re-parsed or
@@ -71,9 +74,9 @@ production on this account — LEX is a project instance forked from it.
 ## How it works
 
 ```
-Required Contracts Register (.xlsx)              SharePoint / network drive
+Required Contracts Register (.xlsx)              Network drive (SMB)
         │  which CW numbers are in scope          (signed/executed PDFs)
-        ▼                                                  │  Microsoft Graph API
+        ▼                                                  │  smbclient (SMB2/3)
 CONTRACT_REGISTER  ◄──────────────────────────────────────-┘
    (MEDSCOMA.DATA_LEX)     linked via CONTRACT_DOCUMENT_LINK
         │                          │
@@ -134,7 +137,7 @@ table rows by their own label text, not position).
 | Project code | `LEX` |
 | Display name | LEX - Legal EXtraction & Contract Intelligence |
 | Catalog database | `MEDSCOMA` (LEX's own — no shared database anywhere) |
-| Catalog schema | `MEDSCOMA.APP_CATALOG` (`PROJECTS`, `PROJECT_SYNC_LOG`, `PROJECT_QUERY_LOG`, Graph API secret) |
+| Catalog schema | `MEDSCOMA.APP_CATALOG` (`PROJECTS`, `PROJECT_SYNC_LOG`, `PROJECT_QUERY_LOG`, network drive credential secret) |
 | Data database | `MEDSCOMA` |
 | Data schema | `MEDSCOMA.DATA_LEX` |
 | Streamlit app | `MEDSCOMA.APP_CATALOG.LEX_APP` |
@@ -156,10 +159,10 @@ Everything LEX reads or writes lives in `MEDSCOMA` — its catalog
 (`APP_CATALOG`, forked from the project-llm-wiki template's usual pattern
 of centralizing that in a shared `MEDSOCMS` database used by every project
 on the account), its data (`DATA_LEX`), its Streamlit app/stage, and its
-own Graph API secret/network rule/external access integration. LEX holds
-no reference to `MEDSOCMS`, to any other project-llm-wiki project's
-resources, or to a compute pool other than its own dedicated
-`STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT`.
+own network drive credential secret/network rule/external access
+integration. LEX holds no reference to `MEDSOCMS`, to any other
+project-llm-wiki project's resources, or to a compute pool other than its
+own dedicated `STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT`.
 
 ## Prerequisites
 
@@ -168,22 +171,27 @@ resources, or to a compute pool other than its own dedicated
    `SYSADMIN`/`ACCOUNTADMIN`-only to create; the provisioning notebook
    attempts both and prints the exact statements to hand to an admin if it
    can't.
-3. LEX's own Microsoft Graph API app registration (Azure AD), with
-   `Sites.Selected` permission granted on the contracts library. LEX does
-   not reuse any shared, tenant-level app registration — see
-   `sql/test_graph_connectivity.sql` for the one-time setup of its
-   dedicated secret (`MEDSCOMA.APP_CATALOG.LEX_GRAPH_API_SECRET`), network
-   rule, and external access integration, then set
-   `GRAPH_TENANT_ID`/`GRAPH_CLIENT_ID`/`GRAPH_SECRET_NAME` on LEX's
-   `PROJECTS` row (the provisioning notebook's Graph API registration
-   cell). Nothing about this is shared with any other project.
-4. `python-docx` (the summary export) resolves via PyPI on container
-   runtime — no extra setup, but note it's deliberately **not** in
-   `environment.yml` (would likely be unresolvable on warehouse runtime's
-   Conda channel; see that file's own comment).
+3. A service account on the contracts library's network drive (a genuine
+   on-prem SMB file share — confirmed not SharePoint, so there is no
+   Graph API, OAuth token, or Azure AD app registration anywhere in this
+   codebase), and the file server's host reachable from Snowflake's
+   outbound network on TCP 445 (Private Link/VPN, per the architecture
+   doc). See `sql/test_network_drive_connectivity.sql` for the one-time
+   setup of LEX's own dedicated PASSWORD-type secret
+   (`MEDSCOMA.APP_CATALOG.LEX_NETWORK_DRIVE_SECRET`, holding the service
+   account's username/password), network rule, and external access
+   integration, then set `NETWORK_DRIVE_HOST`/`NETWORK_DRIVE_SHARE` at
+   project creation and `NETWORK_DRIVE_SECRET_NAME` on LEX's `PROJECTS`
+   row (the provisioning notebook's network drive credentials cell).
+   Nothing about this is shared with any other project.
+4. `python-docx` (the summary export) and `smbprotocol` (the network
+   drive ingestion tab) resolve via PyPI on container runtime — no extra
+   setup, but note both are deliberately **not** in `environment.yml`
+   (would likely be unresolvable on warehouse runtime's Conda channel;
+   see that file's own comment).
 
-Run `sql/test_graph_connectivity.sql` to confirm LEX's own three Graph API
-objects exist before deploying.
+Run `sql/test_network_drive_connectivity.sql` to confirm LEX's own three
+network drive objects exist before deploying.
 
 ## Deploying / running
 
@@ -197,22 +205,27 @@ Snowflake Notebooks. In order, it:
    current role can't (see Prerequisites above).
 4. **Creates the LEX project** — `MEDSCOMA.DATA_LEX` schema/stage, registered
    in the catalog with its segmentation profile and retrieval settings.
-   Confirm the SharePoint site/folder URLs before running this for real —
+   Confirm the network drive host/share before running this for real —
    left blank on purpose rather than guessed.
-5. **Creates LEX's contract tables** — `CONTRACT_REGISTER`,
+5. **Sets the network drive credentials** — records the secret created in
+   `sql/test_network_drive_connectivity.sql` (plus the optional default
+   subfolder/domain) on LEX's `PROJECTS` row. Required before the Network
+   Drive tab works; the Upload tab doesn't need it.
+6. **Creates LEX's contract tables** — `CONTRACT_REGISTER`,
    `CONTRACT_DOCUMENT_LINK`, `CONTRACT_FIELD_EXTRACTS`.
-6. **Creates the `LEX_USERS` role** and grants it to named team members —
+7. **Creates the `LEX_USERS` role** and grants it to named team members —
    add usernames to the notebook's `NAMED_USERS` list and re-run any time
    membership changes.
-7. **Deploys the app** — stages `python/` (structure preserved),
+8. **Deploys the app** — stages `python/` (structure preserved),
    `streamlit/` (flattened to the stage root — see the notebook's own
    comments for why a nested `MAIN_FILE` doesn't work), **and `assets/`**
    (structure preserved, as a sibling of `python/` — this is what
    `docx_report.py` finds the Word template through), then runs
    `CREATE OR REPLACE STREAMLIT`.
-8. **Schema migrations** — forward-only `ALTER TABLE ... ADD COLUMN IF NOT
-   EXISTS` for a LEX project that existed before a given column did (a
-   fresh provisioning run already has every column from step 4/5 above and
+9. **Schema migrations** — forward-only `ALTER TABLE ... ADD COLUMN IF NOT
+   EXISTS` (plus a one-off `SHAREPOINT_ITEM_ID -> SOURCE_ITEM_ID` rename)
+   for a LEX project that existed before a given column did (a fresh
+   provisioning run already has every column from step 4/6 above and
    these are no-ops for it).
 
 Open the app: Snowsight → **Streamlit** → `LEX_APP`.
@@ -226,7 +239,7 @@ Open the app: Snowsight → **Streamlit** → `LEX_APP`.
   history, click **View source** on any finding to open the citation
   panel, and **Download summary (.docx)** for the filled-in template.
 - **Data Sources** — three tabs: upload/sync the Required Contracts
-  Register workbook; ingest contract PDFs/DOCX (upload or SharePoint,
+  Register workbook; ingest contract PDFs/DOCX (upload or network drive,
   flagged if no signed/executed marker is found); manual index rebuild
   (rarely needed — ingestion indexes automatically).
 - **Contract Register** — the admin view: link a contract's documents
@@ -258,7 +271,8 @@ robustness, and citation plumbing. What's actually new for LEX:
 | New | Why |
 |---|---|
 | `PROJECTS.DATA_DATABASE` (+ `CREATE_PROJECT`'s new parameter) | A project's data can now live in its own database (`MEDSCOMA`), not just its own schema inside the shared `MEDSOCMS` this template otherwise defaults to — LEX also moved its catalog schema itself into `MEDSCOMA`, so it holds no shared database at all |
-| `PROJECTS.GRAPH_TENANT_ID` / `GRAPH_CLIENT_ID` / `GRAPH_SECRET_NAME` | LEX's own dedicated Graph API app registration, for least-privilege ingestion — mandatory, not optional: `config.py`'s `resolved_graph_*` properties raise clearly if unset, since LEX has no shared tenant-level app to fall back to |
+| `PROJECTS.NETWORK_DRIVE_HOST` / `NETWORK_DRIVE_SHARE` / `NETWORK_DRIVE_DEFAULT_PATH` / `NETWORK_DRIVE_DOMAIN` / `NETWORK_DRIVE_SECRET_NAME` | LEX's contracts library is a genuine on-prem network drive (SMB), not SharePoint — no Graph API/Azure AD app registration anywhere in this codebase. `config.py`'s `resolved_network_drive_secret_name` raises clearly if the secret isn't set |
+| `utils/network_drive_client.py` (via `smbprotocol`'s `smbclient` submodule) + `ingestion/network_drive_ingest.py` | Replaces this template's usual Microsoft Graph API / SharePoint ingestion client end-to-end — UNVERIFIED against a live SMB server (see that module's docstring) |
 | `LEX_CONTRACT` segmentation profile (`index_builder.py`) | Clause/schedule-aware sectioning for legal contracts |
 | Chunked indexing (`index_builder.py`) | A 100–500 page contract doesn't fit in one indexing call |
 | `query_engine.search()`'s `restrict_to_doc_ids` parameter | Scopes search to one contract's linked documents — what makes stock-field extraction just "search with the document set pre-selected" |
@@ -303,12 +317,24 @@ from this environment, though:
   template is ever edited in a way that removes one of those markers —
   but a *cosmetic* template edit that keeps every marker intact is
   untested beyond the one template file bundled in `assets/`.
+- `utils/network_drive_client.py`'s SMB support (`smbprotocol`'s
+  `smbclient` submodule) is genuinely unverified — written without a live
+  SMB server, Snowflake account, or container runtime to test against. If
+  it doesn't connect, the two most likely causes are Snowflake's outbound
+  network only permitting HTTPS egress (not raw SMB/445), or
+  `smbprotocol`'s compiled `cryptography` dependency failing to resolve
+  via this account's PyPI access integration. The PASSWORD-type secret's
+  exact shape under `st.secrets` (username/password fields) is also
+  unverified — only `GENERIC_STRING` secrets are confirmed working
+  elsewhere in this codebase.
 
 ## Open items
 
-1. Confirm the "network drive" is actually a SharePoint library reachable
-   via Graph API (assumed throughout this repo) — a raw file share needs a
-   different ingestion bridge.
+1. The exact SMB dialect/auth the file server expects (assumed SMB2/3
+   with NTLM username+password, since modern Windows Server generally
+   rejects SMB1) — confirm with whoever manages the file server, and
+   adjust `utils/network_drive_client.py` if it turns out to need
+   something else (e.g. Kerberos).
 2. The 3–5 named users for the `LEX_USERS` role.
 3. Whatever identifies the BG/Cash securities-reconciliation list, for a
    future `SECURITIES_RECONCILIATION` view.

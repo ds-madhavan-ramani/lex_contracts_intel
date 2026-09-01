@@ -47,9 +47,10 @@ MAX_VECTOR_CANDIDATES = 15
 class AnswerResult:
     answer: str
     # [{"number": 1, "file_name": ..., "url": ...}, ...] — url is None for
-    # directly-uploaded documents (no SharePoint source to link to). Older
-    # cached rows (from before citations were structured) may still hold
-    # plain filename strings; render defensively for both shapes.
+    # directly-uploaded or network-drive-sourced documents (no web-browsable
+    # source to link to). Older cached rows (from before citations were
+    # structured) may still hold plain filename strings; render defensively
+    # for both shapes.
     cited_docs: List[Dict] = field(default_factory=list)
     nodes_visited: List[int] = field(default_factory=list)
     from_cache: bool = False
@@ -99,8 +100,8 @@ def search(session, project: ProjectConfig, question: str, use_cache: bool = Tru
     if doc_count == 0:
         return AnswerResult(
             answer=("No documents have been added to this project yet. "
-                    "Go to the Data Sources page to upload files or connect "
-                    "a SharePoint folder, then come back and ask again."),
+                    "Go to the Data Sources page to upload files or ingest "
+                    "from the network drive, then come back and ask again."),
         )
 
     # Scoped queries (restrict_to_doc_ids) need the doc scope baked into

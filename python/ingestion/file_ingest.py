@@ -54,7 +54,7 @@ def ingest_uploaded_files(session, project: ProjectConfig, uploaded_files: List)
                 # AI_PARSE_DOCUMENT needs a FILE-typed argument, built via
                 # TO_FILE('@stage', 'path') — not the VARCHAR URL
                 # BUILD_SCOPED_FILE_URL returns (same bug fixed in
-                # sharepoint_ingest.py's equivalent call).
+                # network_drive_ingest.py's equivalent call).
                 parsed = session.sql(
                     "SELECT AI_PARSE_DOCUMENT(TO_FILE(?, ?), "
                     "PARSE_JSON('{\"mode\": \"OCR\"}')) AS RESULT",

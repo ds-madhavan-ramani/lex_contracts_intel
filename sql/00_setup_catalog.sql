@@ -59,26 +59,23 @@ CREATE TABLE IF NOT EXISTS PROJECTS (
     QUERY_WAREHOUSE                VARCHAR(100) NOT NULL DEFAULT 'MTMWH02',
     COMPUTE_POOL                    VARCHAR(100),                   -- NULL = warehouse runtime; set = container runtime
 
-    -- SharePoint source config (optional — a project can be file-upload-only)
-    SHAREPOINT_SITE_URL       VARCHAR(500),
-    SHAREPOINT_DEFAULT_FOLDER VARCHAR(1000),
-
-    -- LEX's own Graph API app registration — a dedicated service account
-    -- scoped to only the contracts library. Unlike the project-llm-wiki
-    -- template's usual pattern (a shared tenant-level app every project
-    -- reuses by default), LEX has no shared fallback: these three columns
-    -- must be populated (see the provisioning notebook's Graph API
-    -- registration cell) before SharePoint ingestion will work —
-    -- config.py's resolved_graph_* properties raise clearly if they're
-    -- not. GRAPH_TENANT_ID/GRAPH_CLIENT_ID are not secret (Microsoft
-    -- surfaces both on the app registration's own Overview page), so
-    -- they're plain columns here like everything else on this row; only
-    -- the secret's *name* is stored — its value lives in a Snowflake
-    -- SECRET object, created and bound separately (see
-    -- sql/test_graph_connectivity.sql).
-    GRAPH_TENANT_ID            VARCHAR(100),
-    GRAPH_CLIENT_ID            VARCHAR(100),
-    GRAPH_SECRET_NAME          VARCHAR(200),   -- fully qualified, e.g. 'MEDSCOMA.APP_CATALOG.LEX_GRAPH_API_SECRET'
+    -- LEX's contracts library is a genuine on-prem network drive (SMB
+    -- file share), not SharePoint — confirmed directly, so there is no
+    -- Graph API / Azure AD app registration anywhere in this template
+    -- for LEX. HOST/SHARE are the two "day one" identifying values,
+    -- passed to CREATE_PROJECT; the rest are set separately via the
+    -- provisioning notebook's network-drive-credentials cell, since they
+    -- depend on a Secret object that doesn't exist until after the
+    -- project row itself does (see sql/test_network_drive_connectivity.sql).
+    NETWORK_DRIVE_HOST         VARCHAR(255) NOT NULL DEFAULT '',   -- e.g. 'fileserver.mtm.local' — also
+                                                                    -- what the EAI network rule allow-lists
+    NETWORK_DRIVE_SHARE        VARCHAR(255) NOT NULL DEFAULT '',   -- e.g. 'Contracts'
+    NETWORK_DRIVE_DEFAULT_PATH VARCHAR(1000),                      -- optional subfolder within the share
+    NETWORK_DRIVE_DOMAIN       VARCHAR(100),                       -- optional NTLM domain for the service account
+    NETWORK_DRIVE_SECRET_NAME  VARCHAR(200),   -- fully qualified PASSWORD-type secret, e.g.
+                                                -- 'MEDSCOMA.APP_CATALOG.LEX_NETWORK_DRIVE_SECRET' —
+                                                -- config.py's resolved_network_drive_secret_name
+                                                -- raises clearly if this isn't set yet
 
     -- Per-project model / tuning knobs (were hardcoded in config.py)
     ACTIVE_MODEL               VARCHAR(50)  DEFAULT 'claude-haiku-4-5',
@@ -129,7 +126,7 @@ CREATE TABLE IF NOT EXISTS PROJECTS (
 CREATE TABLE IF NOT EXISTS PROJECT_SYNC_LOG (
     RUN_ID          INT IDENTITY PRIMARY KEY,
     PROJECT_ID      INT NOT NULL REFERENCES PROJECTS(PROJECT_ID),
-    SOURCE_TYPE     VARCHAR(20) NOT NULL,       -- 'UPLOAD' | 'SHAREPOINT'
+    SOURCE_TYPE     VARCHAR(20) NOT NULL,       -- 'UPLOAD' | 'NETWORK_DRIVE'
     RUN_TIMESTAMP   TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
     FILES_FOUND     INT DEFAULT 0,
     FILES_SYNCED    INT DEFAULT 0,
@@ -164,8 +161,8 @@ CREATE OR REPLACE PROCEDURE CREATE_PROJECT(
     PROJECT_CODE             VARCHAR,
     PROJECT_NAME              VARCHAR,
     DESCRIPTION               VARCHAR,
-    SHAREPOINT_SITE_URL        VARCHAR,
-    SHAREPOINT_DEFAULT_FOLDER   VARCHAR,
+    NETWORK_DRIVE_HOST         VARCHAR,
+    NETWORK_DRIVE_SHARE         VARCHAR,
     CREATED_BY                   VARCHAR,
     QUERY_WAREHOUSE                VARCHAR,   -- pass '' or NULL to use the default 'MTMWH02'
     COMPUTE_POOL                    VARCHAR,   -- pass '' or NULL for warehouse runtime (no compute pool)
@@ -181,7 +178,7 @@ $$
 import re
 
 def run(session, project_code, project_name, description,
-        sharepoint_site_url, sharepoint_default_folder, created_by,
+        network_drive_host, network_drive_share, created_by,
         query_warehouse, compute_pool, data_database):
 
     code = (project_code or "").strip().upper()
@@ -206,6 +203,8 @@ def run(session, project_code, project_name, description,
     compute_pool = (compute_pool or "").strip()
     if compute_pool.lower() in ("", "none", "null"):
         compute_pool = None
+    network_drive_host = (network_drive_host or "").strip()
+    network_drive_share = (network_drive_share or "").strip()
 
     # 1. Create the project's isolated data schema. data_database must
     #    already exist — this proc does not create databases (typically a
@@ -226,12 +225,14 @@ def run(session, project_code, project_name, description,
               DOC_ID              INT IDENTITY PRIMARY KEY,
               FILE_NAME            VARCHAR(500) NOT NULL,
               STAGE_PATH            VARCHAR(1000) NOT NULL,
-              SOURCE_TYPE            VARCHAR(20) NOT NULL,   -- 'UPLOAD' | 'SHAREPOINT'
-              SHAREPOINT_ITEM_ID      VARCHAR(200),           -- dedup key, NULL for uploads
+              SOURCE_TYPE            VARCHAR(20) NOT NULL,   -- 'UPLOAD' | 'NETWORK_DRIVE'
+              SOURCE_ITEM_ID          VARCHAR(1000),          -- dedup key (network drive UNC path), NULL for uploads
               DOCUMENT_DATE             DATE,                    -- best-effort extracted date
               RAW_TEXT                   VARCHAR(16777216),
               SOURCE_HASH                 VARCHAR(64),             -- SHA256 of raw_text, idempotency
-              SOURCE_URL                   VARCHAR(2000),            -- SharePoint webUrl, NULL for uploads
+              SOURCE_URL                   VARCHAR(2000),            -- external web link, if any — NULL for
+                                                                      -- network-drive/upload sources (neither
+                                                                      -- has a web-browsable URL)
               PARSED_AT                    TIMESTAMP_NTZ,
               CREATED_AT                    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
             )""",
@@ -266,11 +267,11 @@ def run(session, project_code, project_name, description,
         """INSERT INTO PROJECTS
            (PROJECT_CODE, PROJECT_NAME, DESCRIPTION, DATA_DATABASE, DATA_SCHEMA, STAGE_NAME,
             STREAMLIT_APP_NAME, STREAMLIT_STAGE_NAME, QUERY_WAREHOUSE, COMPUTE_POOL,
-            SHAREPOINT_SITE_URL, SHAREPOINT_DEFAULT_FOLDER, CREATED_BY)
+            NETWORK_DRIVE_HOST, NETWORK_DRIVE_SHARE, CREATED_BY)
            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?""",
         params=[code, project_name, description, data_database, data_schema, stage_name,
                 streamlit_app_name, streamlit_stage_name, query_warehouse, compute_pool,
-                sharepoint_site_url, sharepoint_default_folder, created_by],
+                network_drive_host, network_drive_share, created_by],
     ).collect()
 
     return (f"Project '{code}' created. Data schema {data_database}.{data_schema} and "

@@ -6,8 +6,8 @@ for candidate source files.
 LEX-specific: not part of the generic project-llm-wiki template. The team
 maintains a Required Contracts Register — an .xlsx listing every CW number
 LEX should have data for (2 today, growing to 8 for Build/validation, more
-later) — separate from whatever happens to sit in the SharePoint/network-
-drive folder. This module seeds CONTRACT_REGISTER from that register so the
+later) — separate from whatever happens to sit in the network drive
+folder. This module seeds CONTRACT_REGISTER from that register so the
 Contract Lookup page has a fixed, known set of contract numbers to offer,
 independent of ingestion order.
 """
