@@ -3,8 +3,9 @@ provisioning/create_project.py — thin CLI wrapper around the CREATE_PROJECT
 stored procedure (sql/00_setup_catalog.sql). Used by the setup notebook.
 
 Forked from the project-llm-wiki template;
-adds --data-database (default MEDSOCMS) since a project's data can now live
-in its own database, not just its own schema.
+adds --data-database (default MEDSCOMA — LEX's own dedicated database,
+never the shared MEDSOCMS this template otherwise defaults to) since a
+project's data can now live in its own database, not just its own schema.
 
     python provisioning/create_project.py \\
         --code LEX \\
@@ -47,7 +48,7 @@ def main():
     parser.add_argument("--created-by", default="")
     parser.add_argument("--query-warehouse", default="", help="Default: MTMWH02")
     parser.add_argument("--compute-pool", default="", help="Blank = warehouse runtime")
-    parser.add_argument("--data-database", default="", help="Default: MEDSOCMS")
+    parser.add_argument("--data-database", default="", help="Default: MEDSCOMA")
     args = parser.parse_args()
 
     message = create_project(
