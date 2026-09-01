@@ -14,11 +14,18 @@ dependencies = [
     # exactly (not a >= floor) to the specific version confirmed working
     # on this account, avoiding resolver ambiguity.
     "streamlit[snowflake]==1.50.0",
-    "requests",
     "pandas",
     # Pure Python, no system dependencies (no LibreOffice/Word install on
     # the compute pool) — used by docx_report.py to fill in the team's own
     # Contract Workspace Summary Template (assets/*.docx) with extracted
     # values for the downloadable summary.
     "python-docx>=1.1.0",
+    # SMB2/3 client (via its smbclient submodule) for the network drive
+    # ingestion tab — LEX's contracts library is a genuine on-prem file
+    # share, not SharePoint, so this replaces what would otherwise be a
+    # `requests`-based Graph API client. Needs its compiled `cryptography`
+    # dependency to resolve via this account's PyPI access integration;
+    # UNVERIFIED against a live account (see
+    # utils/network_drive_client.py's docstring).
+    "smbprotocol>=1.15.0",
 ]

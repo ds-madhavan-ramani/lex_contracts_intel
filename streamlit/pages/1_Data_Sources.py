@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 import streamlit as st
 from snowflake_session import get_session
 from ingestion.file_ingest import ingest_uploaded_files
-from ingestion.sharepoint_ingest import list_sharepoint_folder, ingest_selected_files
+from ingestion.network_drive_ingest import list_network_drive_folder, ingest_selected_files
 from ingestion.index_builder import build_index_for_project
 import required_contracts
 
@@ -40,9 +40,9 @@ project = st.session_state["project"]
 
 st.title(f"📁 Data Sources — {project.project_name}")
 
-tab_register, tab_upload, tab_sharepoint, tab_index = st.tabs(
+tab_register, tab_upload, tab_network_drive, tab_index = st.tabs(
     ["📋 Required Contracts Register", "📤 Upload Contract Files",
-     "🔗 SharePoint / Network Drive", "🌳 Index"]
+     "🔗 Network Drive", "🌳 Index"]
 )
 
 # ---------------------------------------------------------------------------
@@ -139,34 +139,42 @@ with tab_upload:
             )
 
 # ---------------------------------------------------------------------------
-with tab_sharepoint:
-    st.subheader("Ingest from SharePoint / the network drive")
-    default_folder = project.sharepoint_default_folder or ""
-    if default_folder:
-        st.caption("📁 Source: this project's configured contracts folder")
-
-    with st.expander("Use a different folder instead", expanded=not default_folder):
-        override_folder = st.text_input(
-            "SharePoint folder URL", placeholder="https://metrotrains.sharepoint.com/:f:/s/.../..."
+with tab_network_drive:
+    st.subheader("Ingest from the network drive")
+    if not project.network_drive_host or not project.network_drive_share:
+        st.warning(
+            "This project's network drive host/share aren't configured yet — set "
+            "NETWORK_DRIVE_HOST/NETWORK_DRIVE_SHARE on the project-creation cell in "
+            "pipeline/00_provision_project.ipynb (an admin-only, one-time step; unlike "
+            "the old SharePoint URL, the file server itself isn't something a user pastes "
+            "in at runtime — it has to match the External Access Integration's network rule)."
         )
-    folder_url = override_folder.strip() if override_folder.strip() else default_folder
+        st.stop()
 
-    if "sp_listing" not in st.session_state:
-        st.session_state["sp_listing"] = None
+    st.caption(f"📁 Source: \\\\{project.network_drive_host}\\{project.network_drive_share}")
+    default_path = project.network_drive_default_path or ""
+    if default_path:
+        st.caption(f"Default subfolder: {default_path}")
 
-    if not folder_url:
-        st.warning("This project has no folder configured yet — paste one above.")
-    elif st.button("List files in folder"):
+    with st.expander("Use a different subfolder instead", expanded=not default_path):
+        override_subfolder = st.text_input(
+            "Subfolder path within the share", placeholder="e.g. Signed Contracts\\2025"
+        )
+    subfolder = override_subfolder.strip() if override_subfolder.strip() else default_path
+
+    if "nd_listing" not in st.session_state:
+        st.session_state["nd_listing"] = None
+
+    if st.button("List files in folder"):
         with st.spinner("Listing folder…"):
             try:
-                listing = list_sharepoint_folder(session, project, folder_url)
-                st.session_state["sp_listing"] = listing
-                st.session_state["sp_folder_url"] = folder_url
+                listing = list_network_drive_folder(project, subfolder)
+                st.session_state["nd_listing"] = listing
             except Exception as e:  # noqa: BLE001
                 st.error(f"Couldn't list that folder: {e}")
-                st.session_state["sp_listing"] = None
+                st.session_state["nd_listing"] = None
 
-    listing = st.session_state.get("sp_listing")
+    listing = st.session_state.get("nd_listing")
     if listing:
         eligible = [item for item in listing if required_contracts.is_eligible_extension(item.name)]
         st.write(
@@ -197,9 +205,7 @@ with tab_sharepoint:
         if st.button("Ingest selected files", type="primary"):
             selected_items = [i for i in listing if i.name in selected_names]
             with st.spinner(f"Ingesting {len(selected_items)} file(s)…"):
-                results = ingest_selected_files(
-                    session, project, st.session_state["sp_folder_url"], selected_items
-                )
+                results = ingest_selected_files(session, project, selected_items)
                 doc_ids = [r.doc_id for r in results if r.status in ("INGESTED", "UPDATED") and r.doc_id]
                 indexed_count = 0
                 if doc_ids:

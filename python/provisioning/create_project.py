@@ -6,13 +6,16 @@ Forked from the project-llm-wiki template;
 adds --data-database (default MEDSCOMA — LEX's own dedicated database,
 never the shared MEDSOCMS this template otherwise defaults to) since a
 project's data can now live in its own database, not just its own schema.
+Also replaces --sharepoint-site/--sharepoint-folder with
+--network-drive-host/--network-drive-share — LEX's contracts library was
+confirmed to be a genuine on-prem network drive (SMB), not SharePoint.
 
     python provisioning/create_project.py \\
         --code LEX \\
         --name "LEX - Legal EXtraction & Contract Intelligence" \\
         --description "Contract Q&A and stock-field extraction for signed contracts" \\
-        --sharepoint-site "https://metrotrains.sharepoint.com/sites/<contracts-site>" \\
-        --sharepoint-folder "https://metrotrains.sharepoint.com/:f:/s/<contracts-site>/..." \\
+        --network-drive-host fileserver.mtm.local \\
+        --network-drive-share Contracts \\
         --query-warehouse MTMWH02 \\
         --compute-pool STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT \\
         --data-database MEDSCOMA
@@ -26,13 +29,13 @@ from snowflake_session import get_session  # noqa: E402
 
 
 def create_project(code: str, name: str, description: str = "",
-                   sharepoint_site: str = "", sharepoint_folder: str = "",
+                   network_drive_host: str = "", network_drive_share: str = "",
                    created_by: str = "", query_warehouse: str = "",
                    compute_pool: str = "", data_database: str = "") -> str:
     session = get_session()
     result = session.sql(
         "CALL CREATE_PROJECT(?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        params=[code, name, description, sharepoint_site, sharepoint_folder,
+        params=[code, name, description, network_drive_host, network_drive_share,
                 created_by, query_warehouse, compute_pool, data_database],
     ).collect()
     return result[0][0]
@@ -43,8 +46,8 @@ def main():
     parser.add_argument("--code", required=True, help="Short code, e.g. LEX")
     parser.add_argument("--name", required=True, help="Display name")
     parser.add_argument("--description", default="")
-    parser.add_argument("--sharepoint-site", default="")
-    parser.add_argument("--sharepoint-folder", default="")
+    parser.add_argument("--network-drive-host", default="", help="e.g. fileserver.mtm.local")
+    parser.add_argument("--network-drive-share", default="", help="e.g. Contracts")
     parser.add_argument("--created-by", default="")
     parser.add_argument("--query-warehouse", default="", help="Default: MTMWH02")
     parser.add_argument("--compute-pool", default="", help="Blank = warehouse runtime")
@@ -53,7 +56,7 @@ def main():
 
     message = create_project(
         code=args.code, name=args.name, description=args.description,
-        sharepoint_site=args.sharepoint_site, sharepoint_folder=args.sharepoint_folder,
+        network_drive_host=args.network_drive_host, network_drive_share=args.network_drive_share,
         created_by=args.created_by, query_warehouse=args.query_warehouse,
         compute_pool=args.compute_pool, data_database=args.data_database,
     )
