@@ -142,7 +142,7 @@ table rows by their own label text, not position).
 | Data schema | `MEDSCOMA.DATA_LEX` |
 | Streamlit app | `MEDSCOMA.APP_CATALOG.LEX_APP` |
 | Compute pool | `STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT` (container runtime, dedicated, `MIN_NODES=1 MAX_NODES=2`) |
-| Access | `LEX_USERS` role, granted only to named team members |
+| Access | `LEX_USERS` role, granted to `ADVANCEDANALYTICS` via role hierarchy — actual membership managed by a security group, not per-user grants |
 | Segmentation profile | `LEX_CONTRACT` (clause/schedule-aware, not generic prose sectioning) |
 | Segmentation granularity | `DETAILED` (one section per clause, for precise citation in long documents) |
 | Reranking | Enabled |
@@ -213,9 +213,10 @@ Snowflake Notebooks. In order, it:
    Drive tab works; the Upload tab doesn't need it.
 6. **Creates LEX's contract tables** — `CONTRACT_REGISTER`,
    `CONTRACT_DOCUMENT_LINK`, `CONTRACT_FIELD_EXTRACTS`.
-7. **Creates the `LEX_USERS` role** and grants it to named team members —
-   add usernames to the notebook's `NAMED_USERS` list and re-run any time
-   membership changes.
+7. **Creates the `LEX_USERS` role** and grants it once to `ADVANCEDANALYTICS`
+   — actual user access is managed externally via a security group, not
+   per-user grants in this notebook. Note this gives LEX access to
+   everyone who holds `ADVANCEDANALYTICS`, not just a named handful.
 8. **Deploys the app** — stages `python/` (structure preserved),
    `streamlit/` (flattened to the stage root — see the notebook's own
    comments for why a nested `MAIN_FILE` doesn't work), **and `assets/`**
@@ -335,7 +336,9 @@ from this environment, though:
    rejects SMB1) — confirm with whoever manages the file server, and
    adjust `utils/network_drive_client.py` if it turns out to need
    something else (e.g. Kerberos).
-2. The 3–5 named users for the `LEX_USERS` role.
+2. Confirm the security group behind `ADVANCEDANALYTICS` is scoped to the
+   right population — `LEX_USERS` is granted to that role directly, so
+   whoever it's provisioned to gets LEX access.
 3. Whatever identifies the BG/Cash securities-reconciliation list, for a
    future `SECURITIES_RECONCILIATION` view.
 4. The existing CW-number formatting convention, so
