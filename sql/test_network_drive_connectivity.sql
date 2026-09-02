@@ -61,7 +61,15 @@ CREATE EXTERNAL ACCESS INTEGRATION IF NOT EXISTS LEX_NETWORK_DRIVE_ACCESS_INTEGR
   ALLOWED_AUTHENTICATION_SECRETS = (MEDSCOMA.APP_CATALOG.LEX_NETWORK_DRIVE_SECRET)
   ENABLED = TRUE;
 
+-- Both grants below are typically needed alongside the CREATE statements
+-- above (same SYSADMIN/ACCOUNTADMIN privilege, so worth bundling into one
+-- ask): ADVANCEDANALYTICS needs USAGE on the SECRET to bind it in the
+-- Streamlit app's SECRETS clause, and separately USAGE on the INTEGRATION
+-- itself to reference it in EXTERNAL_ACCESS_INTEGRATIONS at all — without
+-- the second grant, CREATE STREAMLIT fails with the same "does not exist
+-- or not authorized" error the integration itself throws when missing.
 GRANT USAGE ON SECRET MEDSCOMA.APP_CATALOG.LEX_NETWORK_DRIVE_SECRET TO ROLE ADVANCEDANALYTICS;
+GRANT USAGE ON INTEGRATION LEX_NETWORK_DRIVE_ACCESS_INTEGRATION TO ROLE ADVANCEDANALYTICS;
 
 -- Then set LEX's network drive host/share (if not already set at project
 -- creation), optional default subfolder/domain, and the secret's
