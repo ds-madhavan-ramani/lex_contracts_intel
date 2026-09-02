@@ -213,16 +213,18 @@ Snowflake Notebooks. In order, it:
    Drive tab works; the Upload tab doesn't need it.
 6. **Creates LEX's contract tables** — `CONTRACT_REGISTER`,
    `CONTRACT_DOCUMENT_LINK`, `CONTRACT_FIELD_EXTRACTS`.
-7. **Creates the `LEX_USERS` role** and grants it once to `ADVANCEDANALYTICS`
-   — actual user access is managed externally via a security group, not
-   per-user grants in this notebook. Note this gives LEX access to
-   everyone who holds `ADVANCEDANALYTICS`, not just a named handful.
-8. **Deploys the app** — stages `python/` (structure preserved),
+7. **Deploys the app** — stages `python/` (structure preserved),
    `streamlit/` (flattened to the stage root — see the notebook's own
    comments for why a nested `MAIN_FILE` doesn't work), **and `assets/`**
    (structure preserved, as a sibling of `python/` — this is what
    `docx_report.py` finds the Word template through), then runs
    `CREATE OR REPLACE STREAMLIT`.
+8. **Creates the `LEX_USERS` role** and grants it once to `ADVANCEDANALYTICS`
+   — actual user access is managed externally via a security group, not
+   per-user grants in this notebook. Note this gives LEX access to
+   everyone who holds `ADVANCEDANALYTICS`, not just a named handful. Runs
+   after the deploy step since `GRANT USAGE ON STREAMLIT` needs the app
+   object to already exist.
 9. **Schema migrations** — forward-only `ALTER TABLE ... ADD COLUMN IF NOT
    EXISTS` (plus a one-off `SHAREPOINT_ITEM_ID -> SOURCE_ITEM_ID` rename)
    for a LEX project that existed before a given column did (a fresh
