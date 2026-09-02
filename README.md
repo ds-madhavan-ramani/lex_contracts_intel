@@ -333,19 +333,30 @@ from this environment, though:
 
 ## Open items
 
-1. The exact SMB dialect/auth the file server expects (assumed SMB2/3
+1. **Confirmed, not just a risk**: `metrotrains.local` is not directly
+   DNS-resolvable from Snowflake — `CREATE NETWORK RULE ... VALUE_LIST =
+   ('metrotrains.local:445')` fails with "invalid value ... unresolvable
+   host name." It's an AD domain / likely a DFS namespace root, not a
+   single server's own address. Need the actual file server's IP or a
+   resolvable FQDN from whoever manages it before the network rule (and
+   `PROJECTS.NETWORK_DRIVE_HOST`) can be created — see
+   `sql/test_network_drive_connectivity.sql`'s comments for the options
+   considered (real IP/FQDN, a DNS forwarder for the internal zone via
+   Private Link, or a wildcard pattern if the real target turns out to be
+   a subdomain).
+2. The exact SMB dialect/auth the file server expects (assumed SMB2/3
    with NTLM username+password, since modern Windows Server generally
    rejects SMB1) — confirm with whoever manages the file server, and
    adjust `utils/network_drive_client.py` if it turns out to need
    something else (e.g. Kerberos).
-2. Confirm the security group behind `ADVANCEDANALYTICS` is scoped to the
+3. Confirm the security group behind `ADVANCEDANALYTICS` is scoped to the
    right population — `LEX_USERS` is granted to that role directly, so
    whoever it's provisioned to gets LEX access.
-3. Whatever identifies the BG/Cash securities-reconciliation list, for a
+4. Whatever identifies the BG/Cash securities-reconciliation list, for a
    future `SECURITIES_RECONCILIATION` view.
-4. The existing CW-number formatting convention, so
+5. The existing CW-number formatting convention, so
    `contract_linking.suggest_cw_number()`'s auto-suggestion is reliable.
-5. Confirmation that Cortex cross-region inference (to AWS AU) is
+6. Confirmation that Cortex cross-region inference (to AWS AU) is
    acceptable for signed contract content, from a data-handling/compliance
    standpoint.
 
