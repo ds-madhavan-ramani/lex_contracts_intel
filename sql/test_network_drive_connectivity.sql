@@ -51,11 +51,31 @@ CREATE SECRET IF NOT EXISTS MEDSCOMA.APP_CATALOG.LEX_NETWORK_DRIVE_SECRET
   USERNAME = '<service_account_username>'
   PASSWORD = '<service_account_password>';
 
+-- CONFIRMED on a real account: Snowflake resolves <fileserver-host> via
+-- DNS at CREATE time and rejects the statement ("invalid value ...
+-- unresolvable host name") if it can't. An AD domain name or DFS
+-- namespace root (e.g. 'metrotrains.local') is NOT guaranteed to resolve
+-- this way even though Windows clients reach it fine via referrals — use
+-- the actual file server's IP address or a directly resolvable FQDN
+-- instead, or a wildcard pattern ('*.metrotrains.local:445') if the real
+-- target turns out to be a subdomain (a wildcard won't match the bare
+-- root domain itself, so it isn't a fix if the literal host truly is the
+-- namespace root).
 CREATE NETWORK RULE IF NOT EXISTS MEDSCOMA.APP_CATALOG.LEX_NETWORK_DRIVE_NETWORK_RULE
   MODE = EGRESS
   TYPE = HOST_PORT
   VALUE_LIST = ('<fileserver-host>:445');
 
+-- CONFIRMED on a real account: the role creating this integration needs
+-- OWNERSHIP (not just USAGE) on both the network rule and the secret it
+-- references. If SYSADMIN/ACCOUNTADMIN doesn't already own them (e.g.
+-- ADVANCEDANALYTICS created them earlier in this same script), transfer
+-- ownership first — COPY CURRENT GRANTS preserves ADVANCEDANALYTICS's own
+-- USAGE so the app deployment still works afterward:
+--   GRANT OWNERSHIP ON SECRET MEDSCOMA.APP_CATALOG.LEX_NETWORK_DRIVE_SECRET
+--     TO ROLE SYSADMIN COPY CURRENT GRANTS;
+--   GRANT OWNERSHIP ON NETWORK RULE MEDSCOMA.APP_CATALOG.LEX_NETWORK_DRIVE_NETWORK_RULE
+--     TO ROLE SYSADMIN COPY CURRENT GRANTS;
 CREATE EXTERNAL ACCESS INTEGRATION IF NOT EXISTS LEX_NETWORK_DRIVE_ACCESS_INTEGRATION
   ALLOWED_NETWORK_RULES = (MEDSCOMA.APP_CATALOG.LEX_NETWORK_DRIVE_NETWORK_RULE)
   ALLOWED_AUTHENTICATION_SECRETS = (MEDSCOMA.APP_CATALOG.LEX_NETWORK_DRIVE_SECRET)

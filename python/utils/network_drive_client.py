@@ -30,6 +30,7 @@ class of failure other packages have hit elsewhere in this codebase's
 history.
 """
 
+import os
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -72,6 +73,13 @@ def get_network_drive_credentials(alias: str = "network_drive_credential"):
     are confirmed working) — if this fails, check Snowflake's current docs
     for exactly how a PASSWORD-type secret surfaces under st.secrets, and
     adjust the attribute/key access below.
+
+    Falls through to NETWORK_DRIVE_USERNAME/NETWORK_DRIVE_PASSWORD
+    environment variables as a third option, for standalone scripts that
+    run entirely outside Snowflake/Streamlit — e.g.
+    pipeline/network_drive_to_stage.py, a bridge agent run from inside the
+    MTM network while direct Snowflake-to-network-drive connectivity is
+    still being sorted out with the Networks team.
     """
     try:
         import streamlit as st
@@ -80,9 +88,25 @@ def get_network_drive_credentials(alias: str = "network_drive_credential"):
         password = cred["password"] if isinstance(cred, dict) else cred.password
         return username, password
     except Exception:
+        pass
+
+    try:
         import _snowflake
         cred = _snowflake.get_username_password_secret(alias)
         return cred.username, cred.password
+    except Exception:
+        pass
+
+    username = os.environ.get("NETWORK_DRIVE_USERNAME")
+    password = os.environ.get("NETWORK_DRIVE_PASSWORD")
+    if username and password:
+        return username, password
+
+    raise NetworkDriveError(
+        "Could not resolve network drive credentials from st.secrets, "
+        "_snowflake, or the NETWORK_DRIVE_USERNAME/NETWORK_DRIVE_PASSWORD "
+        "environment variables."
+    )
 
 
 def _ensure_registered(project) -> None:
