@@ -20,14 +20,21 @@ existing Private Link / VPN connectivity between Snowflake and the MTM
 network (per the architecture doc) to actually route raw SMB traffic, not
 just HTTPS.
 
-UNVERIFIED: written without a live SMB server, Snowflake account, or
-container runtime to test against — treat this as a best-effort starting
-point, not confirmed-working code. If it doesn't connect, the two most
-likely culprits are (1) the network path only permitting HTTPS egress,
-not raw SMB/445, and (2) smbprotocol's compiled dependency (cryptography)
-failing to resolve via this account's PyPI access integration, the same
-class of failure other packages have hit elsewhere in this codebase's
-history.
+CONFIRMED against a live network share via the bridge host
+(pipeline/network_drive_browser_app.py): the initial version passed
+domain= to smbclient.register_session(), which doesn't accept it in the
+installed smbprotocol version (TypeError: register_session() got an
+unexpected keyword argument 'domain') — fixed by folding the NTLM domain
+into the username as "DOMAIN\\username" instead, which is what
+register_session actually expects.
+
+Still UNVERIFIED for the Streamlit-in-Snowflake path specifically (only
+the standalone bridge host has been tested so far): if that path doesn't
+connect, the two most likely culprits are (1) the network path only
+permitting HTTPS egress, not raw SMB/445, and (2) smbprotocol's compiled
+dependency (cryptography) failing to resolve via this account's PyPI
+access integration, the same class of failure other packages have hit
+elsewhere in this codebase's history.
 """
 
 import os
@@ -114,10 +121,15 @@ def _ensure_registered(project) -> None:
     if host in _registered_hosts:
         return
     username, password = get_network_drive_credentials()
-    smbclient.register_session(
-        host, username=username, password=password,
-        domain=project.network_drive_domain or "",
-    )
+    domain = project.network_drive_domain
+    # smbclient.register_session() has no domain= parameter (confirmed
+    # against the installed smbprotocol version) — NTLM domain has to be
+    # embedded in the username as "DOMAIN\username" instead. Only prefix
+    # if the caller hasn't already qualified it themselves (a bare
+    # backslash or a UPN-style user@domain).
+    if domain and "\\" not in username and "@" not in username:
+        username = f"{domain}\\{username}"
+    smbclient.register_session(host, username=username, password=password)
     _registered_hosts.add(host)
 
 
