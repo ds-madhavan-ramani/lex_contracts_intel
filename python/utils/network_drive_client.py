@@ -175,14 +175,25 @@ def _unc_path(project, relative_path: str = "") -> str:
 def list_files(project, relative_path: str = "", recursive: bool = True) -> List[NetworkDriveItem]:
     """Lists files under the share (optionally a subfolder), recursively by
     default — a contracts library is commonly organized into
-    year/client/type subfolders."""
+    year/client/type subfolders. Materializes iter_files() into a list —
+    see iter_files() for a streaming version."""
+    return list(iter_files(project, relative_path, recursive))
+
+
+def iter_files(project, relative_path: str = "", recursive: bool = True):
+    """Streaming version of list_files(): yields each NetworkDriveItem as
+    it's found instead of waiting for the whole (possibly large, deeply
+    nested) recursive walk to finish first. A contracts library with
+    hundreds of CW folders, each many subfolders deep, can take a while to
+    walk in full — a caller like Streamlit can use this to update its UI
+    incrementally rather than showing a single spinner for the entire
+    walk."""
     _ensure_registered(project)
     root = _unc_path(project, relative_path)
-    return _list_dir(root, recursive)
+    yield from _iter_dir(root, recursive)
 
 
-def _list_dir(root: str, recursive: bool) -> List[NetworkDriveItem]:
-    results: List[NetworkDriveItem] = []
+def _iter_dir(root: str, recursive: bool):
     try:
         entries = smbclient.listdir(root)
     except Exception as e:
@@ -193,18 +204,16 @@ def _list_dir(root: str, recursive: bool) -> List[NetworkDriveItem]:
         try:
             if smbclient.path.isdir(full):
                 if recursive:
-                    results.extend(_list_dir(full, recursive=True))
+                    yield from _iter_dir(full, recursive=True)
                 continue
             info = smbclient.stat(full)
-            results.append(NetworkDriveItem(
+            yield NetworkDriveItem(
                 item_id=full, name=name, path=full,
                 size_bytes=getattr(info, "st_size", 0),
                 last_modified=getattr(info, "st_mtime", None),
-            ))
+            )
         except Exception as e:  # noqa: BLE001
             logger.warning("EVENT=NETWORK_DRIVE_LIST_ITEM_FAILED path=%s error=%s", full, e)
-
-    return results
 
 
 def download_file(project, item_path: str) -> bytes:

@@ -21,7 +21,6 @@ against — treat this as a best-effort starting point.
 """
 
 import os
-import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
@@ -29,7 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 import streamlit as st
 
 from required_contracts import looks_signed  # noqa: E402
-from utils.network_drive_client import list_files, NetworkDriveError  # noqa: E402
+from utils.network_drive_client import iter_files, NetworkDriveError  # noqa: E402
 
 from network_drive_to_stage import (  # noqa: E402
     INBOX_STAGE,
@@ -39,15 +38,14 @@ from network_drive_to_stage import (  # noqa: E402
     _stage_one,
 )
 
-# Contract folders are named by CW number (e.g. "CW14465"), sometimes
-# "CWR" for a revised workspace — matched anywhere in a file's path so it
-# works whether the CW folder is the immediate parent or a few levels up.
-_CW_NUMBER_RE = re.compile(r"(CWR?\d+)", re.IGNORECASE)
-
-
-def _cw_number_for(item_path: str) -> str:
-    match = _CW_NUMBER_RE.search(item_path)
-    return match.group(1).upper() if match else ""
+# Initial scope, per the team: only search these 7 CW folders rather than
+# the full Ariba\Contracts tree (100+ CW folders, each many levels deep —
+# walking all of them took long enough that the UI looked hung). Editable
+# in the UI below; this is just the starting default.
+DEFAULT_CW_FOLDERS = [
+    "CW14465", "CW20841", "CW23401", "CW67873",
+    "CW82416", "CW86868", "CW87278",
+]
 
 
 @st.cache_data(ttl=300)
@@ -94,66 +92,80 @@ except SystemExit as e:
 st.caption(f"Source: \\\\{drive.network_drive_host}\\{drive.network_drive_share}")
 
 default_path = drive.network_drive_default_path or ""
-folder = st.text_input(
-    "Path or CW folder (relative to the share root)",
+base_path = st.text_input(
+    "Base path (relative to the share root)",
     value=default_path,
-    placeholder=r"e.g. AppData\prd\MR5Documents\Ariba\CW14465",
+    placeholder=r"e.g. AppData\prd\MR5Documents\Ariba",
+)
+cw_text = st.text_area(
+    "CW folders to search (one per line) — each is searched as "
+    f"{(base_path or '<base path>').strip(chr(92))}\\Contracts\\<CW number>",
+    value="\n".join(DEFAULT_CW_FOLDERS),
+    height=150,
 )
 show_all_pdfs = st.checkbox(
-    "Show all PDFs in this folder (not just ones marked Signed/Executed)"
+    "Show all PDFs in these folders (not just ones marked Signed/Executed)"
 )
 
-if "browser_listing" not in st.session_state:
-    st.session_state["browser_listing"] = None
+if "browser_rows" not in st.session_state:
+    st.session_state["browser_rows"] = []
+if "browser_items" not in st.session_state:
+    st.session_state["browser_items"] = []
 
 if st.button("List files of interest", type="primary"):
-    with st.spinner("Listing folder over SMB…"):
+    cw_folders = [line.strip() for line in cw_text.splitlines() if line.strip()]
+    titles = _contract_titles()
+    items, rows = [], []
+    status = st.empty()
+    table_placeholder = st.empty()
+
+    for cw in cw_folders:
+        status.write(f"Searching {cw}… ({len(items)} matching file(s) so far)")
+        relative_path = f"{base_path.strip(chr(92) + '/')}\\Contracts\\{cw}"
         try:
-            items = list_files(drive, relative_path=folder, recursive=True)
-            st.session_state["browser_listing"] = items
+            for item in iter_files(drive, relative_path=relative_path, recursive=True):
+                if not item.name.lower().endswith(".pdf"):
+                    continue
+                if not show_all_pdfs and not looks_signed(item.name):
+                    continue
+                items.append(item)
+                rows.append({
+                    "CW/Folder": cw,
+                    "Contract Title": titles.get(cw, ""),
+                    "File": item.name,
+                })
+                # Update the table every few files rather than only once
+                # everything is done — a folder with hundreds of nested
+                # subfolders can take a while to walk in full.
+                if len(items) % 3 == 0:
+                    table_placeholder.dataframe(rows, use_container_width=True, hide_index=True)
         except NetworkDriveError as e:
-            st.error(f"Couldn't list that folder: {e}")
-            st.session_state["browser_listing"] = None
+            st.warning(f"{cw}: {e}")
 
-listing = st.session_state.get("browser_listing")
-if listing is not None:
-    pdfs = [item for item in listing if item.name.lower().endswith(".pdf")]
-    of_interest = pdfs if show_all_pdfs else [item for item in pdfs if looks_signed(item.name)]
-    st.write(
-        f"Found **{len(listing)}** file(s), **{len(pdfs)}** PDF(s), "
-        f"**{len(of_interest)}** shown below."
+    table_placeholder.dataframe(rows, use_container_width=True, hide_index=True)
+    status.write(f"Done — {len(items)} matching file(s) found across {len(cw_folders)} CW folder(s).")
+    st.session_state["browser_items"] = items
+    st.session_state["browser_rows"] = rows
+
+items = st.session_state["browser_items"]
+rows = st.session_state["browser_rows"]
+if items:
+    # Keyed by index, not file name — two different CW folders can have
+    # identically-named files (e.g. every CW folder having its own
+    # "Executed.pdf").
+    labels = [f"{r['CW/Folder']} — {r['File']}" for r in rows]
+    selected_labels = st.multiselect(
+        "Select files to copy to the stage", options=labels, default=labels
     )
-
-    if not of_interest:
-        st.info("No matching PDFs found under this path.")
-    else:
-        titles = _contract_titles()
-        rows = [
-            {
-                "CW/Folder": _cw_number_for(item.path) or "—",
-                "Contract Title": titles.get(_cw_number_for(item.path), ""),
-                "File": item.name,
-            }
-            for item in of_interest
-        ]
-        st.dataframe(rows, use_container_width=True, hide_index=True)
-
-        # Keyed by index, not file name — two different CW folders can
-        # have identically-named files (e.g. every CW folder having its
-        # own "Executed.pdf").
-        labels = [f"{r['CW/Folder']} — {r['File']}" for r in rows]
-        selected_labels = st.multiselect(
-            "Select files to copy to the stage", options=labels, default=labels
-        )
-        if st.button("Copy selected files to stage"):
-            selected_items = [item for item, label in zip(of_interest, labels) if label in selected_labels]
-            progress = st.empty()
-            for item in selected_items:
-                progress.write(f"Staging {item.name}…")
-                _stage_one(conn, drive, item.item_id, item.name)
-            progress.write("Done.")
-            st.session_state["staged_just_now"] = [i.name for i in selected_items]
-            st.rerun()
+    if st.button("Copy selected files to stage"):
+        selected_items = [item for item, label in zip(items, labels) if label in selected_labels]
+        progress = st.empty()
+        for item in selected_items:
+            progress.write(f"Staging {item.name}…")
+            _stage_one(conn, drive, item.item_id, item.name)
+        progress.write("Done.")
+        st.session_state["staged_just_now"] = [i.name for i in selected_items]
+        st.rerun()
 
 st.divider()
 st.subheader("Stage folder contents")
