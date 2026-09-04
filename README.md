@@ -23,6 +23,17 @@ production on this account — LEX is a project instance forked from it.
 > and the code reflect all three changes. Treat those two documents as
 > historical pending a refresh, not as the current spec.
 
+> **Companion repo — [`lex_network_bridge`](https://github.com/ds-madhavan-ramani/lex_network_bridge)**:
+> Snowflake's outbound network can't yet reach the MTM network drive
+> directly (`metrotrains.local` isn't a directly resolvable/routable
+> target from Snowflake — see Open Items below), so a stopgap bridge tool
+> runs on a Linux host *inside* the MTM network instead, pushing selected
+> contract PDFs out to `MEDSCOMA.DATA_LEX.NETWORK_DRIVE_INBOX_STAGE` via
+> `PUT`. That tool (and its own copy of `utils/network_drive_client.py`)
+> now lives entirely in that separate repo, not here. Picking staged files
+> up from there into this app's normal ingest pipeline (`RAW_DOCUMENTS`,
+> parsing, contract linking) is separate, not-yet-built work.
+
 ## What it does
 
 - **The Required Contracts Register**: an .xlsx the team maintains
@@ -336,14 +347,18 @@ from this environment, though:
 1. **Confirmed, not just a risk**: `metrotrains.local` is not directly
    DNS-resolvable from Snowflake — `CREATE NETWORK RULE ... VALUE_LIST =
    ('metrotrains.local:445')` fails with "invalid value ... unresolvable
-   host name." It's an AD domain / likely a DFS namespace root, not a
-   single server's own address. Need the actual file server's IP or a
-   resolvable FQDN from whoever manages it before the network rule (and
+   host name." Now further confirmed (via the `lex_network_bridge` repo's
+   work, run from inside the MTM network): `apps$` is a domain-based DFS
+   namespace, not a single file server — the real target, revealed by an
+   SMB client's own referral-following logs, is
+   `MTADFS201V.metrotrains.local`. Need this (or a resolvable path to it)
+   usable from Snowflake's outbound network before the network rule (and
    `PROJECTS.NETWORK_DRIVE_HOST`) can be created — see
    `sql/test_network_drive_connectivity.sql`'s comments for the options
    considered (real IP/FQDN, a DNS forwarder for the internal zone via
    Private Link, or a wildcard pattern if the real target turns out to be
-   a subdomain).
+   a subdomain). Until this is resolved, `lex_network_bridge` is the
+   practical way to get files into `NETWORK_DRIVE_INBOX_STAGE`.
 2. The exact SMB dialect/auth the file server expects (assumed SMB2/3
    with NTLM username+password, since modern Windows Server generally
    rejects SMB1) — confirm with whoever manages the file server, and
