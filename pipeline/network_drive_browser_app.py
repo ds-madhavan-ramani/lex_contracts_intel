@@ -29,6 +29,7 @@ import streamlit as st
 
 from required_contracts import looks_signed  # noqa: E402
 from utils.network_drive_client import iter_files, NetworkDriveError  # noqa: E402
+from ingestion.xlsx_parser import extract_column_values  # noqa: E402
 
 from network_drive_to_stage import (  # noqa: E402
     INBOX_STAGE,
@@ -38,14 +39,27 @@ from network_drive_to_stage import (  # noqa: E402
     _stage_one,
 )
 
-# Initial scope, per the team: only search these 7 CW folders rather than
-# the full Ariba\Contracts tree (100+ CW folders, each many levels deep —
-# walking all of them took long enough that the UI looked hung). Editable
-# in the UI below; this is just the starting default.
-DEFAULT_CW_FOLDERS = [
-    "CW14465", "CW20841", "CW23401", "CW67873",
-    "CW82416", "CW86868", "CW87278",
-]
+# CW folders to search come from Contracts.xlsx, kept in this same folder
+# (next to this script) — the team maintains that file directly, adding/
+# removing CW numbers over time, and this app re-reads it on demand (the
+# "Reload Contracts.xlsx" button) rather than needing a code change here.
+CONTRACTS_XLSX_PATH = os.path.join(os.path.dirname(__file__), "Contracts.xlsx")
+_CW_COLUMN_ALIASES = (
+    "Contract_Workspace_ID", "CW Number", "CWNumber", "Contract Number",
+    "CW", "Contract No", "ContractNo",
+)
+
+
+def _load_cw_folders_from_xlsx(path: str) -> list:
+    with open(path, "rb") as f:
+        raw = f.read()
+    seen, folders = set(), []
+    for value in extract_column_values(raw, _CW_COLUMN_ALIASES):
+        cw = value.strip().upper()
+        if cw and cw not in seen:
+            seen.add(cw)
+            folders.append(cw)
+    return folders
 
 
 @st.cache_data(ttl=300)
@@ -97,12 +111,40 @@ base_path = st.text_input(
     value=default_path,
     placeholder=r"e.g. AppData\prd\MR5Documents\Ariba",
 )
-cw_text = st.text_area(
-    "CW folders to search (one per line) — each is searched as "
-    f"{(base_path or '<base path>').strip(chr(92))}\\Contracts\\<CW number>",
-    value="\n".join(DEFAULT_CW_FOLDERS),
-    height=150,
+
+st.caption(
+    f"CW folders to search come from `{CONTRACTS_XLSX_PATH}` — a single "
+    "column headed \"Contract_Workspace_ID\", one CW number per row. Edit "
+    "that file directly, then click Reload."
 )
+if st.button("Reload Contracts.xlsx"):
+    st.session_state.pop("cw_folders_cache", None)
+
+if "cw_folders_cache" not in st.session_state:
+    try:
+        st.session_state["cw_folders_cache"] = _load_cw_folders_from_xlsx(CONTRACTS_XLSX_PATH)
+    except FileNotFoundError:
+        st.session_state["cw_folders_cache"] = None
+    except Exception as e:  # noqa: BLE001
+        st.error(f"Could not read {CONTRACTS_XLSX_PATH}: {e}")
+        st.session_state["cw_folders_cache"] = None
+
+cw_folders = st.session_state["cw_folders_cache"]
+if cw_folders is None:
+    st.warning(
+        f"{CONTRACTS_XLSX_PATH} not found. Place your Contracts.xlsx there "
+        "(single column headed \"Contract_Workspace_ID\") and click Reload."
+    )
+    cw_folders = []
+elif not cw_folders:
+    st.warning(
+        "Contracts.xlsx was read but no CW numbers were found in it — check "
+        "the column header matches \"Contract_Workspace_ID\" (or CW Number / "
+        "CW / Contract Number)."
+    )
+else:
+    st.write(f"**{len(cw_folders)}** CW folder(s) loaded: {', '.join(cw_folders)}")
+
 show_all_pdfs = st.checkbox(
     "Show all PDFs in these folders (not just ones marked Signed/Executed)"
 )
@@ -112,8 +154,7 @@ if "browser_rows" not in st.session_state:
 if "browser_items" not in st.session_state:
     st.session_state["browser_items"] = []
 
-if st.button("List files of interest", type="primary"):
-    cw_folders = [line.strip() for line in cw_text.splitlines() if line.strip()]
+if st.button("List files of interest", type="primary", disabled=not cw_folders):
     titles = _contract_titles()
     items, rows = [], []
     status = st.empty()
