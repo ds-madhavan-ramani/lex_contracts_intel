@@ -21,6 +21,7 @@ against — treat this as a best-effort starting point.
 """
 
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
@@ -37,6 +38,30 @@ from network_drive_to_stage import (  # noqa: E402
     ensure_inbox_stage,
     _stage_one,
 )
+
+# Contract folders are named by CW number (e.g. "CW14465"), sometimes
+# "CWR" for a revised workspace — matched anywhere in a file's path so it
+# works whether the CW folder is the immediate parent or a few levels up.
+_CW_NUMBER_RE = re.compile(r"(CWR?\d+)", re.IGNORECASE)
+
+
+def _cw_number_for(item_path: str) -> str:
+    match = _CW_NUMBER_RE.search(item_path)
+    return match.group(1).upper() if match else ""
+
+
+@st.cache_data(ttl=300)
+def _contract_titles() -> dict:
+    """CW number -> title, from the Required Contracts Register already
+    synced into CONTRACT_REGISTER. Best-effort: an empty dict here just
+    means titles won't show, not a hard failure — the register may not be
+    synced yet, or may not have a title for every CW number."""
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT CW_NUMBER, CONTRACT_TITLE FROM MEDSCOMA.DATA_LEX.CONTRACT_REGISTER")
+        return {row[0]: row[1] for row in cur.fetchall() if row[1]}
+    except Exception:
+        return {}
 
 st.set_page_config(page_title="LEX Network Drive Bridge", page_icon="📁", layout="wide")
 st.title("📁 LEX Network Drive Bridge")
@@ -102,13 +127,26 @@ if listing is not None:
     if not of_interest:
         st.info("No matching PDFs found under this path.")
     else:
-        selected_names = st.multiselect(
-            "Select files to copy to the stage",
-            options=[item.name for item in of_interest],
-            default=[item.name for item in of_interest],
+        titles = _contract_titles()
+        rows = [
+            {
+                "CW/Folder": _cw_number_for(item.path) or "—",
+                "Contract Title": titles.get(_cw_number_for(item.path), ""),
+                "File": item.name,
+            }
+            for item in of_interest
+        ]
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+        # Keyed by index, not file name — two different CW folders can
+        # have identically-named files (e.g. every CW folder having its
+        # own "Executed.pdf").
+        labels = [f"{r['CW/Folder']} — {r['File']}" for r in rows]
+        selected_labels = st.multiselect(
+            "Select files to copy to the stage", options=labels, default=labels
         )
         if st.button("Copy selected files to stage"):
-            selected_items = [i for i in of_interest if i.name in selected_names]
+            selected_items = [item for item, label in zip(of_interest, labels) if label in selected_labels]
             progress = st.empty()
             for item in selected_items:
                 progress.write(f"Staging {item.name}…")
