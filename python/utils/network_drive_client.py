@@ -28,6 +28,18 @@ unexpected keyword argument 'domain') — fixed by folding the NTLM domain
 into the username as "DOMAIN\\username" instead, which is what
 register_session actually expects.
 
+Also CONFIRMED: LEX's network drive path (\\metrotrains.local\apps$) is a
+domain-based DFS namespace, not a plain file server — smbclient follows
+the DFS referral transparently and opens a second connection to whatever
+server the referral names (observed as MTADFS201V.metrotrains.local),
+which register_session() can't pre-register since that hostname isn't
+known until the referral response arrives mid-request. Without a fallback
+credential, that second connection attempted anonymous auth and hung
+until the server reset it. Fixed by also calling
+smbclient.ClientConfig(username=..., password=...) once — its
+username/password serve as the default credential for any connection the
+library opens on its own, referral targets included.
+
 Still UNVERIFIED for the Streamlit-in-Snowflake path specifically (only
 the standalone bridge host has been tested so far): if that path doesn't
 connect, the two most likely culprits are (1) the network path only
@@ -116,10 +128,12 @@ def get_network_drive_credentials(alias: str = "network_drive_credential"):
     )
 
 
+_client_config_set = False
+
+
 def _ensure_registered(project) -> None:
+    global _client_config_set
     host = project.network_drive_host
-    if host in _registered_hosts:
-        return
     username, password = get_network_drive_credentials()
     domain = project.network_drive_domain
     # smbclient.register_session() has no domain= parameter (confirmed
@@ -129,6 +143,25 @@ def _ensure_registered(project) -> None:
     # backslash or a UPN-style user@domain).
     if domain and "\\" not in username and "@" not in username:
         username = f"{domain}\\{username}"
+
+    if not _client_config_set:
+        # CONFIRMED against a live share: LEX's network drive path is a
+        # domain-based DFS namespace (\\metrotrains.local\apps$) — the
+        # library follows the DFS referral transparently and opens a
+        # second connection to whatever server the referral names (seen
+        # in the logs as e.g. MTADFS201V.metrotrains.local), which
+        # register_session() below can't pre-register since that hostname
+        # isn't known until the referral response arrives mid-request.
+        # ClientConfig's username/password act as the fallback credential
+        # for any such connection the library opens on its own, which is
+        # what was missing (the referral connection was attempting anonymous
+        # auth — "Initialising session with username: None" — and hanging
+        # until the server reset it).
+        smbclient.ClientConfig(username=username, password=password)
+        _client_config_set = True
+
+    if host in _registered_hosts:
+        return
     smbclient.register_session(host, username=username, password=password)
     _registered_hosts.add(host)
 
