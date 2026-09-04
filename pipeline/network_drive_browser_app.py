@@ -171,7 +171,7 @@ if st.button("List files of interest", type="primary", disabled=not cw_folders):
                     continue
                 items.append(item)
                 rows.append({
-                    "CW/Folder": cw,
+                    "CW_Folder": cw,
                     "Contract Title": titles.get(cw, ""),
                     "File": item.name,
                 })
@@ -194,7 +194,7 @@ if items:
     # Keyed by index, not file name — two different CW folders can have
     # identically-named files (e.g. every CW folder having its own
     # "Executed.pdf").
-    labels = [f"{r['CW/Folder']} — {r['File']}" for r in rows]
+    labels = [f"{r['CW_Folder']} — {r['File']}" for r in rows]
     selected_labels = st.multiselect(
         "Select files to copy to the stage", options=labels, default=labels
     )
