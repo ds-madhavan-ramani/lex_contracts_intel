@@ -20,8 +20,9 @@ existing Private Link / VPN connectivity between Snowflake and the MTM
 network (per the architecture doc) to actually route raw SMB traffic, not
 just HTTPS.
 
-CONFIRMED against a live network share via the bridge host
-(pipeline/network_drive_browser_app.py): the initial version passed
+CONFIRMED against a live network share via the bridge host (see the
+companion lex_network_bridge repo, https://github.com/ds-madhavan-ramani/lex_network_bridge):
+the initial version passed
 domain= to smbclient.register_session(), which doesn't accept it in the
 installed smbprotocol version (TypeError: register_session() got an
 unexpected keyword argument 'domain') — fixed by folding the NTLM domain
@@ -95,10 +96,11 @@ def get_network_drive_credentials(alias: str = "network_drive_credential"):
 
     Falls through to NETWORK_DRIVE_USERNAME/NETWORK_DRIVE_PASSWORD
     environment variables as a third option, for standalone scripts that
-    run entirely outside Snowflake/Streamlit — e.g.
-    pipeline/network_drive_to_stage.py, a bridge agent run from inside the
-    MTM network while direct Snowflake-to-network-drive connectivity is
-    still being sorted out with the Networks team.
+    run entirely outside Snowflake/Streamlit — e.g. the bridge agent in
+    the companion lex_network_bridge repo
+    (https://github.com/ds-madhavan-ramani/lex_network_bridge), run from
+    inside the MTM network while direct Snowflake-to-network-drive
+    connectivity is still being sorted out with the Networks team.
     """
     try:
         import streamlit as st
