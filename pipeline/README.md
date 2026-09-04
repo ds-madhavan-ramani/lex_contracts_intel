@@ -56,6 +56,13 @@ python network_drive_to_stage.py --all
 streamlit run network_drive_browser_app.py
 ```
 
+The UI searches only the CW folders listed in `Contracts.xlsx`, which
+**you maintain directly in this folder** (next to the script) — a single
+column headed `Contract_Workspace_ID`, one CW number per row. Not
+committed to the repo (it's data, not code — see `.gitignore`). Edit the
+file, then click **Reload Contracts.xlsx** in the app to pick up changes
+without restarting it.
+
 **Verify what landed:**
 
 ```sql
