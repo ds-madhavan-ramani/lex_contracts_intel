@@ -30,6 +30,35 @@ schema = project.qualified_schema
 
 st.title(f"📊 Sync Status — {project.project_name}")
 
+# LEX-specific: not part of the generic project-llm-wiki template. Runs
+# the same stage-pickup logic the scheduled Task calls automatically every
+# 5 minutes (see sql/04_stage_pickup_task.sql) — this button exists so
+# there's no need to wait for the schedule, or open a SQL worksheet, to
+# force a run right after staging files via the companion
+# lex_network_bridge repo. The result is stashed in session_state and
+# rendered AFTER the rerun below (a message shown just before st.rerun()
+# is torn down before it's ever visible), then popped so it only shows once.
+if st.session_state.get("stage_pickup_result"):
+    st.success(st.session_state.pop("stage_pickup_result"))
+if st.session_state.get("stage_pickup_error"):
+    st.error(st.session_state.pop("stage_pickup_error"))
+
+if st.button("🔄 Check for new files now", type="primary"):
+    with st.spinner("Draining NETWORK_DRIVE_INBOX_STAGE…"):
+        try:
+            st.session_state["stage_pickup_result"] = session.sql(
+                "CALL MEDSCOMA.APP_CATALOG.RUN_LEX_STAGE_PICKUP()"
+            ).collect()[0][0]
+        except Exception as e:  # noqa: BLE001 — surface it, don't crash the page
+            st.session_state["stage_pickup_error"] = (
+                f"Couldn't run the stage pickup: {e}\n\n"
+                "Most likely cause: the \"Set up the stage pickup task\" "
+                "notebook cell hasn't been run yet (the stored procedure "
+                "doesn't exist)."
+            )
+    st.rerun()
+
+st.divider()
 st.subheader("Required contracts coverage")
 required = required_contracts.list_required_contracts_status(session, project)
 r_col1, r_col2, r_col3 = st.columns(3)

@@ -266,6 +266,10 @@ Open the app: Snowsight → **Streamlit** → `LEX_APP`.
   extraction, and review/verify every field with its citation.
 - **Sync Status** — required-contracts coverage (how many are extracted,
   how many are current) plus raw ingestion/index counts and run history.
+  **Check for new files now** forces a stage-pickup run on the spot
+  (`CALL RUN_LEX_STAGE_PICKUP()`) instead of waiting for the 5-minute
+  scheduled Task — useful right after staging files via the companion
+  `lex_network_bridge` repo.
 
 ## Removing the project
 
