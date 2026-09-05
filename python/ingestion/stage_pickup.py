@@ -1,12 +1,12 @@
 """
 stage_pickup.py — pick up files staged into NETWORK_DRIVE_INBOX_STAGE by
 the companion lex_network_bridge repo's bridge tool (a Linux host running
-*inside* the MTM network, since Snowflake can't yet reach the network
-drive directly — see sql/test_network_drive_connectivity.sql) and feed
-them into this app's normal ingest pipeline: RAW_DOCUMENTS, contract
-linking, and indexing — the same three steps
-ingestion/network_drive_ingest.py's ingest_selected_files() already does
-for a direct-SMB source, just sourcing the file from a different place.
+*inside* the MTM network, since Snowflake can't reach the network drive
+directly — see README's "Open items") and feed them into this app's
+normal ingest pipeline: RAW_DOCUMENTS, contract linking, and indexing —
+the same three steps ingestion/file_ingest.py's ingest_uploaded_files()
+already does for an uploaded file, just sourcing the file from a
+different place, with no direct-SMB path anywhere in this codebase.
 
 Staging convention (see lex_network_bridge's network_drive_to_stage.py):
 files land at @NETWORK_DRIVE_INBOX_STAGE/<CW_NUMBER>/<filename> — the CW
@@ -60,9 +60,9 @@ UNVERIFIED: written without a live Snowflake account, Task, or Stream to
 test against. COPY FILES INTO <stage> FROM <stage> (stage-to-stage, no
 Python byte handling) is assumed to behave the same way GET/PUT does
 elsewhere in this codebase; if it doesn't, fall back to the
-download-bytes-then-put_stream pattern network_drive_ingest.py already
-uses successfully (GET the bytes from NETWORK_DRIVE_INBOX_STAGE instead
-of downloading over SMB, then put_stream into project.qualified_stage).
+get_stream-then-put_stream pattern this module already uses for its own
+xlsx branch below (GET the bytes from NETWORK_DRIVE_INBOX_STAGE, then
+put_stream into project.qualified_stage).
 """
 
 import hashlib
@@ -168,7 +168,7 @@ def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFil
                 continue
 
             # Hashed on parsed text, not file bytes — matches
-            # network_drive_ingest.py exactly, and means a file whose
+            # ingestion/file_ingest.py exactly, and means a file whose
             # content is unchanged is recognized as such even if its raw
             # bytes differ trivially (re-saved PDF metadata, etc.).
             source_hash = hashlib.sha256(raw_text.encode()).hexdigest()

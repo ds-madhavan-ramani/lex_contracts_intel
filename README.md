@@ -24,14 +24,14 @@ production on this account — LEX is a project instance forked from it.
 > historical pending a refresh, not as the current spec.
 
 > **Companion repo — [`lex_network_bridge`](https://github.com/ds-madhavan-ramani/lex_network_bridge)**:
-> Snowflake's outbound network can't yet reach the MTM network drive
-> directly (`metrotrains.local` isn't a directly resolvable/routable
-> target from Snowflake — see Open Items below), so a stopgap bridge tool
-> runs on a Linux host *inside* the MTM network instead, pushing selected
-> contract PDFs out to `MEDSCOMA.DATA_LEX.NETWORK_DRIVE_INBOX_STAGE` via
-> `PUT`, one per-CW subfolder at a time. That tool (and its own copy of
-> `utils/network_drive_client.py`) now lives entirely in that separate
-> repo, not here. From there, a scheduled Task in *this* repo
+> Snowflake's outbound network can't reach the MTM network drive directly
+> (`metrotrains.local` isn't a directly resolvable/routable target from
+> Snowflake — see Open Items below), so there is no direct-SMB ingestion
+> path anywhere in this repo. Instead, a bridge tool runs on a Linux host
+> *inside* the MTM network, pushing selected contract PDFs out to
+> `MEDSCOMA.DATA_LEX.NETWORK_DRIVE_INBOX_STAGE` via `PUT`, one per-CW
+> subfolder at a time. That tool lives entirely in that separate repo, not
+> here. From there, a scheduled Task in *this* repo
 > (`python/ingestion/stage_pickup.py`, `sql/04_stage_pickup_task.sql`)
 > automatically picks staged files up into the normal ingest pipeline —
 > `RAW_DOCUMENTS`, contract linking, indexing, and extraction — on a
@@ -49,9 +49,12 @@ production on this account — LEX is a project instance forked from it.
   title too.
 - **Source documents**: signed/executed contracts, PDF (rarely DOCX) only,
   held on the team's network drive — a genuine on-prem SMB file share,
-  confirmed not SharePoint. A file whose name or text doesn't show a
-  marker like "Signed" or "Executed" is still ingested but flagged for a
-  human to double-check — never silently dropped.
+  confirmed not SharePoint. Since Snowflake can't reach it directly, files
+  arrive via the Data Sources page's Upload tab or the companion
+  `lex_network_bridge` repo's automatic stage-pickup Task — see the note
+  above. A file whose name or text doesn't show a marker like "Signed" or
+  "Executed" is still ingested but flagged for a human to double-check —
+  never silently dropped.
 - **Contract Lookup** (the landing page): pick a contract number, and its
   standard questions are answered from **history**
   (`CONTRACT_FIELD_EXTRACTS`) instantly — nothing is re-parsed or
@@ -88,11 +91,12 @@ production on this account — LEX is a project instance forked from it.
 ## How it works
 
 ```
-Required Contracts Register (.xlsx)              Network drive (SMB)
-        │  which CW numbers are in scope          (signed/executed PDFs)
-        ▼                                                  │  smbclient (SMB2/3)
-CONTRACT_REGISTER  ◄──────────────────────────────────────-┘
-   (MEDSCOMA.DATA_LEX)     linked via CONTRACT_DOCUMENT_LINK
+Required Contracts Register (.xlsx)   Upload tab      lex_network_bridge (SMB,
+        │  which CW numbers          (signed/         separate repo, inside
+        │  are in scope              executed PDFs)   the MTM network) → PUT
+        ▼                                 │            → NETWORK_DRIVE_INBOX_STAGE
+CONTRACT_REGISTER  ◄──────────────────────┴──────────────────┘  stage_pickup.py
+   (MEDSCOMA.DATA_LEX)     linked via CONTRACT_DOCUMENT_LINK     (scheduled Task)
         │                          │
         │                          ▼
         │                  RAW_DOCUMENTS — AI_PARSE_DOCUMENT (OCR), PDF/DOCX
@@ -151,7 +155,7 @@ table rows by their own label text, not position).
 | Project code | `LEX` |
 | Display name | LEX - Legal EXtraction & Contract Intelligence |
 | Catalog database | `MEDSCOMA` (LEX's own — no shared database anywhere) |
-| Catalog schema | `MEDSCOMA.APP_CATALOG` (`PROJECTS`, `PROJECT_SYNC_LOG`, `PROJECT_QUERY_LOG`, network drive credential secret) |
+| Catalog schema | `MEDSCOMA.APP_CATALOG` (`PROJECTS`, `PROJECT_SYNC_LOG`, `PROJECT_QUERY_LOG`) |
 | Data database | `MEDSCOMA` |
 | Data schema | `MEDSCOMA.DATA_LEX` |
 | Streamlit app | `MEDSCOMA.APP_CATALOG.LEX_APP` |
@@ -172,11 +176,10 @@ them.
 Everything LEX reads or writes lives in `MEDSCOMA` — its catalog
 (`APP_CATALOG`, forked from the project-llm-wiki template's usual pattern
 of centralizing that in a shared `MEDSOCMS` database used by every project
-on the account), its data (`DATA_LEX`), its Streamlit app/stage, and its
-own network drive credential secret/network rule/external access
-integration. LEX holds no reference to `MEDSOCMS`, to any other
-project-llm-wiki project's resources, or to a compute pool other than its
-own dedicated `STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT`.
+on the account), its data (`DATA_LEX`), and its Streamlit app/stage. LEX
+holds no reference to `MEDSOCMS`, to any other project-llm-wiki project's
+resources, or to a compute pool other than its own dedicated
+`STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT`.
 
 ## Prerequisites
 
@@ -185,27 +188,17 @@ own dedicated `STREAMLIT_COMPUTE_POOL_CONTRACT_MGMT`.
    `SYSADMIN`/`ACCOUNTADMIN`-only to create; the provisioning notebook
    attempts both and prints the exact statements to hand to an admin if it
    can't.
-3. A service account on the contracts library's network drive (a genuine
-   on-prem SMB file share — confirmed not SharePoint, so there is no
-   Graph API, OAuth token, or Azure AD app registration anywhere in this
-   codebase), and the file server's host reachable from Snowflake's
-   outbound network on TCP 445 (Private Link/VPN, per the architecture
-   doc). See `sql/test_network_drive_connectivity.sql` for the one-time
-   setup of LEX's own dedicated PASSWORD-type secret
-   (`MEDSCOMA.APP_CATALOG.LEX_NETWORK_DRIVE_SECRET`, holding the service
-   account's username/password), network rule, and external access
-   integration, then set `NETWORK_DRIVE_HOST`/`NETWORK_DRIVE_SHARE` at
-   project creation and `NETWORK_DRIVE_SECRET_NAME` on LEX's `PROJECTS`
-   row (the provisioning notebook's network drive credentials cell).
-   Nothing about this is shared with any other project.
-4. `python-docx` (the summary export) and `smbprotocol` (the network
-   drive ingestion tab) resolve via PyPI on container runtime — no extra
-   setup, but note both are deliberately **not** in `environment.yml`
-   (would likely be unresolvable on warehouse runtime's Conda channel;
-   see that file's own comment).
+3. `python-docx` and `reportlab` (the Word/PDF summary exports) resolve
+   via PyPI on container runtime — no extra setup, but note both are
+   deliberately **not** in `environment.yml` (would likely be
+   unresolvable on warehouse runtime's Conda channel; see that file's own
+   comment).
 
-Run `sql/test_network_drive_connectivity.sql` to confirm LEX's own three
-network drive objects exist before deploying.
+There is no direct-SMB ingestion path in this codebase — LEX's contracts
+library is a genuine on-prem network drive, but Snowflake can't reach it
+directly (see Open Items below), so documents arrive via upload or the
+companion `lex_network_bridge` repo's stage-pickup Task instead. Nothing
+network-drive-credential-related needs setting up here.
 
 ## Deploying / running
 
@@ -219,20 +212,19 @@ Snowflake Notebooks. In order, it:
    current role can't (see Prerequisites above).
 4. **Creates the LEX project** — `MEDSCOMA.DATA_LEX` schema/stage, registered
    in the catalog with its segmentation profile and retrieval settings.
-   Confirm the network drive host/share before running this for real —
-   left blank on purpose rather than guessed.
-5. **Sets the network drive credentials** — records the secret created in
-   `sql/test_network_drive_connectivity.sql` (plus the optional default
-   subfolder/domain) on LEX's `PROJECTS` row. Required before the Network
-   Drive tab works; the Upload tab doesn't need it.
-6. **Creates LEX's contract tables** — `CONTRACT_REGISTER`,
+5. **Creates LEX's contract tables** — `CONTRACT_REGISTER`,
    `CONTRACT_DOCUMENT_LINK`, `CONTRACT_FIELD_EXTRACTS`.
-7. **Deploys the app** — stages `python/` (structure preserved),
+6. **Deploys the app** — stages `python/` (structure preserved),
    `streamlit/` (flattened to the stage root — see the notebook's own
    comments for why a nested `MAIN_FILE` doesn't work), **and `assets/`**
    (structure preserved, as a sibling of `python/` — this is what
    `docx_report.py` finds the Word template through), then runs
    `CREATE OR REPLACE STREAMLIT`.
+7. **Sets up the stage pickup task** — runs `sql/04_stage_pickup_task.sql`,
+   the scheduled Task that drains `NETWORK_DRIVE_INBOX_STAGE` (filled by
+   the companion `lex_network_bridge` repo) into the normal ingest
+   pipeline automatically. Must run after step 6 — its stored procedure
+   imports the `python/` tree that step just staged.
 8. **Creates the `LEX_USERS` role** and grants it once to `ADVANCEDANALYTICS`
    — actual user access is managed externally via a security group, not
    per-user grants in this notebook. Note this gives LEX access to
@@ -240,9 +232,10 @@ Snowflake Notebooks. In order, it:
    after the deploy step since `GRANT USAGE ON STREAMLIT` needs the app
    object to already exist.
 9. **Schema migrations** — forward-only `ALTER TABLE ... ADD COLUMN IF NOT
-   EXISTS` (plus a one-off `SHAREPOINT_ITEM_ID -> SOURCE_ITEM_ID` rename)
-   for a LEX project that existed before a given column did (a fresh
-   provisioning run already has every column from step 4/6 above and
+   EXISTS` (plus a one-off `SHAREPOINT_ITEM_ID -> SOURCE_ITEM_ID` rename
+   and the `CONTRACT_OUTPUT_STAGE` cache stage)
+   for a LEX project that existed before a given column/stage did (a fresh
+   provisioning run already has everything from step 4/5 above and
    these are no-ops for it).
 
 Open the app: Snowsight → **Streamlit** → `LEX_APP`.
@@ -259,9 +252,11 @@ Open the app: Snowsight → **Streamlit** → `LEX_APP`.
   async stage-pickup Task or a prior extraction run — falling back to
   building the file on the spot if nothing's cached yet.
 - **Data Sources** — three tabs: upload/sync the Required Contracts
-  Register workbook; ingest contract PDFs/DOCX (upload or network drive,
-  flagged if no signed/executed marker is found); manual index rebuild
-  (rarely needed — ingestion indexes automatically).
+  Register workbook; upload contract PDFs/DOCX (flagged if no
+  signed/executed marker is found); manual index rebuild (rarely needed —
+  ingestion indexes automatically). A document can also arrive
+  automatically via the companion `lex_network_bridge` repo's stage-pickup
+  Task — no UI here for that path, it just shows up already ingested.
 - **Contract Register** — the admin view: link a contract's documents
   (base + variations/extensions/novations) into one family, run/re-run
   extraction, and review/verify every field with its citation.
@@ -291,8 +286,6 @@ robustness, and citation plumbing. What's actually new for LEX:
 | New | Why |
 |---|---|
 | `PROJECTS.DATA_DATABASE` (+ `CREATE_PROJECT`'s new parameter) | A project's data can now live in its own database (`MEDSCOMA`), not just its own schema inside the shared `MEDSOCMS` this template otherwise defaults to — LEX also moved its catalog schema itself into `MEDSCOMA`, so it holds no shared database at all |
-| `PROJECTS.NETWORK_DRIVE_HOST` / `NETWORK_DRIVE_SHARE` / `NETWORK_DRIVE_DEFAULT_PATH` / `NETWORK_DRIVE_DOMAIN` / `NETWORK_DRIVE_SECRET_NAME` | LEX's contracts library is a genuine on-prem network drive (SMB), not SharePoint — no Graph API/Azure AD app registration anywhere in this codebase. `config.py`'s `resolved_network_drive_secret_name` raises clearly if the secret isn't set |
-| `utils/network_drive_client.py` (via `smbprotocol`'s `smbclient` submodule) + `ingestion/network_drive_ingest.py` | Replaces this template's usual Microsoft Graph API / SharePoint ingestion client end-to-end — UNVERIFIED against a live SMB server (see that module's docstring) |
 | `LEX_CONTRACT` segmentation profile (`index_builder.py`) | Clause/schedule-aware sectioning for legal contracts |
 | Chunked indexing (`index_builder.py`) | A 100–500 page contract doesn't fit in one indexing call |
 | `query_engine.search()`'s `restrict_to_doc_ids` parameter | Scopes search to one contract's linked documents — what makes stock-field extraction just "search with the document set pre-selected" |
@@ -340,16 +333,6 @@ from this environment, though:
   template is ever edited in a way that removes one of those markers —
   but a *cosmetic* template edit that keeps every marker intact is
   untested beyond the one template file bundled in `assets/`.
-- `utils/network_drive_client.py`'s SMB support (`smbprotocol`'s
-  `smbclient` submodule) is genuinely unverified — written without a live
-  SMB server, Snowflake account, or container runtime to test against. If
-  it doesn't connect, the two most likely causes are Snowflake's outbound
-  network only permitting HTTPS egress (not raw SMB/445), or
-  `smbprotocol`'s compiled `cryptography` dependency failing to resolve
-  via this account's PyPI access integration. The PASSWORD-type secret's
-  exact shape under `st.secrets` (username/password fields) is also
-  unverified — only `GENERIC_STRING` secrets are confirmed working
-  elsewhere in this codebase.
 - `sql/04_stage_pickup_task.sql` is genuinely unverified — no live Task,
   Stream, or Python stored procedure to test against. Three specific
   assumptions flagged in that file's own comments: (1) a stored
@@ -373,34 +356,29 @@ from this environment, though:
 
 ## Open items
 
-1. **Confirmed, not just a risk**: `metrotrains.local` is not directly
+1. **Settled, not pursuing further**: `metrotrains.local` is not directly
    DNS-resolvable from Snowflake — `CREATE NETWORK RULE ... VALUE_LIST =
    ('metrotrains.local:445')` fails with "invalid value ... unresolvable
-   host name." Now further confirmed (via the `lex_network_bridge` repo's
+   host name." Further confirmed (via the `lex_network_bridge` repo's own
    work, run from inside the MTM network): `apps$` is a domain-based DFS
    namespace, not a single file server — the real target, revealed by an
    SMB client's own referral-following logs, is
-   `MTADFS201V.metrotrains.local`. Need this (or a resolvable path to it)
-   usable from Snowflake's outbound network before the network rule (and
-   `PROJECTS.NETWORK_DRIVE_HOST`) can be created — see
-   `sql/test_network_drive_connectivity.sql`'s comments for the options
-   considered (real IP/FQDN, a DNS forwarder for the internal zone via
-   Private Link, or a wildcard pattern if the real target turns out to be
-   a subdomain). Until this is resolved, `lex_network_bridge` is the
-   practical way to get files into `NETWORK_DRIVE_INBOX_STAGE`.
-2. The exact SMB dialect/auth the file server expects (assumed SMB2/3
-   with NTLM username+password, since modern Windows Server generally
-   rejects SMB1) — confirm with whoever manages the file server, and
-   adjust `utils/network_drive_client.py` if it turns out to need
-   something else (e.g. Kerberos).
-3. Confirm the security group behind `ADVANCEDANALYTICS` is scoped to the
+   `MTADFS201V.metrotrains.local`. Rather than pursue direct Snowflake
+   connectivity to it (a real IP/FQDN, or a DNS forwarder for the internal
+   zone via Private Link), this repo's direct-SMB ingestion path
+   (`utils/network_drive_client.py`, `ingestion/network_drive_ingest.py`,
+   the Data Sources page's old "Network Drive" tab, and
+   `PROJECTS.NETWORK_DRIVE_*`) has been removed entirely — `lex_network_bridge`
+   is the permanent way to get files into `NETWORK_DRIVE_INBOX_STAGE`, not
+   a stopgap.
+2. Confirm the security group behind `ADVANCEDANALYTICS` is scoped to the
    right population — `LEX_USERS` is granted to that role directly, so
    whoever it's provisioned to gets LEX access.
-4. Whatever identifies the BG/Cash securities-reconciliation list, for a
+3. Whatever identifies the BG/Cash securities-reconciliation list, for a
    future `SECURITIES_RECONCILIATION` view.
-5. The existing CW-number formatting convention, so
+4. The existing CW-number formatting convention, so
    `contract_linking.suggest_cw_number()`'s auto-suggestion is reliable.
-6. Confirmation that Cortex cross-region inference (to AWS AU) is
+5. Confirmation that Cortex cross-region inference (to AWS AU) is
    acceptable for signed contract content, from a data-handling/compliance
    standpoint.
 

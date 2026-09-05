@@ -59,24 +59,6 @@ CREATE TABLE IF NOT EXISTS PROJECTS (
     QUERY_WAREHOUSE                VARCHAR(100) NOT NULL DEFAULT 'MTMWH02',
     COMPUTE_POOL                    VARCHAR(100),                   -- NULL = warehouse runtime; set = container runtime
 
-    -- LEX's contracts library is a genuine on-prem network drive (SMB
-    -- file share), not SharePoint — confirmed directly, so there is no
-    -- Graph API / Azure AD app registration anywhere in this template
-    -- for LEX. HOST/SHARE are the two "day one" identifying values,
-    -- passed to CREATE_PROJECT; the rest are set separately via the
-    -- provisioning notebook's network-drive-credentials cell, since they
-    -- depend on a Secret object that doesn't exist until after the
-    -- project row itself does (see sql/test_network_drive_connectivity.sql).
-    NETWORK_DRIVE_HOST         VARCHAR(255) NOT NULL DEFAULT '',   -- e.g. 'fileserver.mtm.local' — also
-                                                                    -- what the EAI network rule allow-lists
-    NETWORK_DRIVE_SHARE        VARCHAR(255) NOT NULL DEFAULT '',   -- e.g. 'Contracts'
-    NETWORK_DRIVE_DEFAULT_PATH VARCHAR(1000),                      -- optional subfolder within the share
-    NETWORK_DRIVE_DOMAIN       VARCHAR(100),                       -- optional NTLM domain for the service account
-    NETWORK_DRIVE_SECRET_NAME  VARCHAR(200),   -- fully qualified PASSWORD-type secret, e.g.
-                                                -- 'MEDSCOMA.APP_CATALOG.LEX_NETWORK_DRIVE_SECRET' —
-                                                -- config.py's resolved_network_drive_secret_name
-                                                -- raises clearly if this isn't set yet
-
     -- Per-project model / tuning knobs (were hardcoded in config.py)
     ACTIVE_MODEL               VARCHAR(50)  DEFAULT 'claude-haiku-4-5',
     MAX_DOCUMENT_CHARS          INT          DEFAULT 150000,   -- also doubles as the per-chunk size for
@@ -126,7 +108,7 @@ CREATE TABLE IF NOT EXISTS PROJECTS (
 CREATE TABLE IF NOT EXISTS PROJECT_SYNC_LOG (
     RUN_ID          INT IDENTITY PRIMARY KEY,
     PROJECT_ID      INT NOT NULL REFERENCES PROJECTS(PROJECT_ID),
-    SOURCE_TYPE     VARCHAR(20) NOT NULL,       -- 'UPLOAD' | 'NETWORK_DRIVE'
+    SOURCE_TYPE     VARCHAR(20) NOT NULL,       -- 'UPLOAD' | 'NETWORK_DRIVE_STAGE'
     RUN_TIMESTAMP   TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
     FILES_FOUND     INT DEFAULT 0,
     FILES_SYNCED    INT DEFAULT 0,
@@ -161,8 +143,6 @@ CREATE OR REPLACE PROCEDURE CREATE_PROJECT(
     PROJECT_CODE             VARCHAR,
     PROJECT_NAME              VARCHAR,
     DESCRIPTION               VARCHAR,
-    NETWORK_DRIVE_HOST         VARCHAR,
-    NETWORK_DRIVE_SHARE         VARCHAR,
     CREATED_BY                   VARCHAR,
     QUERY_WAREHOUSE                VARCHAR,   -- pass '' or NULL to use the default 'MTMWH02'
     COMPUTE_POOL                    VARCHAR,   -- pass '' or NULL for warehouse runtime (no compute pool)
@@ -178,8 +158,7 @@ $$
 import re
 
 def run(session, project_code, project_name, description,
-        network_drive_host, network_drive_share, created_by,
-        query_warehouse, compute_pool, data_database):
+        created_by, query_warehouse, compute_pool, data_database):
 
     code = (project_code or "").strip().upper()
     if not re.match(r'^[A-Z][A-Z0-9_]{2,49}$', code):
@@ -203,8 +182,6 @@ def run(session, project_code, project_name, description,
     compute_pool = (compute_pool or "").strip()
     if compute_pool.lower() in ("", "none", "null"):
         compute_pool = None
-    network_drive_host = (network_drive_host or "").strip()
-    network_drive_share = (network_drive_share or "").strip()
 
     # 1. Create the project's isolated data schema. data_database must
     #    already exist — this proc does not create databases (typically a
@@ -225,8 +202,9 @@ def run(session, project_code, project_name, description,
               DOC_ID              INT IDENTITY PRIMARY KEY,
               FILE_NAME            VARCHAR(500) NOT NULL,
               STAGE_PATH            VARCHAR(1000) NOT NULL,
-              SOURCE_TYPE            VARCHAR(20) NOT NULL,   -- 'UPLOAD' | 'NETWORK_DRIVE'
-              SOURCE_ITEM_ID          VARCHAR(1000),          -- dedup key (network drive UNC path), NULL for uploads
+              SOURCE_TYPE            VARCHAR(20) NOT NULL,   -- 'UPLOAD' | 'NETWORK_DRIVE_STAGE'
+              SOURCE_ITEM_ID          VARCHAR(1000),          -- dedup key ("<CW>/<filename>" for
+                                                               -- NETWORK_DRIVE_STAGE), NULL for uploads
               DOCUMENT_DATE             DATE,                    -- best-effort extracted date
               RAW_TEXT                   VARCHAR(16777216),
               SOURCE_HASH                 VARCHAR(64),             -- SHA256 of raw_text, idempotency
@@ -266,12 +244,10 @@ def run(session, project_code, project_name, description,
     session.sql(
         """INSERT INTO PROJECTS
            (PROJECT_CODE, PROJECT_NAME, DESCRIPTION, DATA_DATABASE, DATA_SCHEMA, STAGE_NAME,
-            STREAMLIT_APP_NAME, STREAMLIT_STAGE_NAME, QUERY_WAREHOUSE, COMPUTE_POOL,
-            NETWORK_DRIVE_HOST, NETWORK_DRIVE_SHARE, CREATED_BY)
-           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?""",
+            STREAMLIT_APP_NAME, STREAMLIT_STAGE_NAME, QUERY_WAREHOUSE, COMPUTE_POOL, CREATED_BY)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?""",
         params=[code, project_name, description, data_database, data_schema, stage_name,
-                streamlit_app_name, streamlit_stage_name, query_warehouse, compute_pool,
-                network_drive_host, network_drive_share, created_by],
+                streamlit_app_name, streamlit_stage_name, query_warehouse, compute_pool, created_by],
     ).collect()
 
     return (f"Project '{code}' created. Data schema {data_database}.{data_schema} and "

@@ -1,8 +1,11 @@
 """
 pages/1_Data_Sources.py — three things: (1) upload/sync the Required
 Contracts Register workbook that tells LEX which CW numbers are in scope,
-(2) ingest the actual signed/executed contract PDFs (rarely DOCX) for
-those contracts, and (3) the manual index-rebuild fallback.
+(2) upload the actual signed/executed contract PDFs (rarely DOCX) for
+those contracts, and (3) the manual index-rebuild fallback. A document
+can also arrive automatically via the companion lex_network_bridge repo's
+stage-pickup Task (ingestion/stage_pickup.py) — that path has no UI here,
+it just shows up already ingested/extracted once the Task has run.
 
 Forked from the project-llm-wiki template.
 Differences from that template: no register-workbook file-*selection*
@@ -25,7 +28,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 import streamlit as st
 from snowflake_session import get_session
 from ingestion.file_ingest import ingest_uploaded_files
-from ingestion.network_drive_ingest import list_network_drive_folder, ingest_selected_files
 from ingestion.index_builder import build_index_for_project
 import required_contracts
 
@@ -40,9 +42,8 @@ project = st.session_state["project"]
 
 st.title(f"📁 Data Sources — {project.project_name}")
 
-tab_register, tab_upload, tab_network_drive, tab_index = st.tabs(
-    ["📋 Required Contracts Register", "📤 Upload Contract Files",
-     "🔗 Network Drive", "🌳 Index"]
+tab_register, tab_upload, tab_index = st.tabs(
+    ["📋 Required Contracts Register", "📤 Upload Contract Files", "🌳 Index"]
 )
 
 # ---------------------------------------------------------------------------
@@ -137,108 +138,6 @@ with tab_upload:
                 f"Indexed {indexed_count} document(s) — link them to a contract number on the "
                 "Contract Register page, then look them up on Contract Lookup."
             )
-
-# ---------------------------------------------------------------------------
-with tab_network_drive:
-    st.subheader("Ingest from the network drive")
-    if not project.network_drive_host or not project.network_drive_share:
-        st.warning(
-            "This project's network drive host/share aren't configured yet — set "
-            "NETWORK_DRIVE_HOST/NETWORK_DRIVE_SHARE on the project-creation cell in "
-            "pipeline/00_provision_project.ipynb (an admin-only, one-time step; unlike "
-            "the old SharePoint URL, the file server itself isn't something a user pastes "
-            "in at runtime — it has to match the External Access Integration's network rule)."
-        )
-        st.stop()
-
-    st.caption(f"📁 Source: \\\\{project.network_drive_host}\\{project.network_drive_share}")
-    default_path = project.network_drive_default_path or ""
-    if default_path:
-        st.caption(f"Default subfolder: {default_path}")
-
-    with st.expander("Use a different subfolder instead", expanded=not default_path):
-        override_subfolder = st.text_input(
-            "Subfolder path within the share", placeholder="e.g. Signed Contracts\\2025"
-        )
-    subfolder = override_subfolder.strip() if override_subfolder.strip() else default_path
-
-    if "nd_listing" not in st.session_state:
-        st.session_state["nd_listing"] = None
-
-    if st.button("List files in folder"):
-        with st.spinner("Listing folder…"):
-            try:
-                listing = list_network_drive_folder(project, subfolder)
-                st.session_state["nd_listing"] = listing
-            except Exception as e:  # noqa: BLE001
-                st.error(f"Couldn't list that folder: {e}")
-                st.session_state["nd_listing"] = None
-
-    listing = st.session_state.get("nd_listing")
-    if listing:
-        eligible = [item for item in listing if required_contracts.is_eligible_extension(item.name)]
-        st.write(
-            f"Found **{len(listing)}** file(s) in this folder — **{len(eligible)}** are PDF/DOCX "
-            "(the only formats contracts are ingested from; other files here are hidden)."
-        )
-
-        name_filter = st.text_input(
-            "Filter by file name", value="",
-            help="Matches this text anywhere in the file name (case-insensitive). "
-                 "Leave blank to show every PDF/DOCX file in the folder.",
-        )
-        pool = (
-            [item for item in eligible if name_filter.strip().lower() in item.name.lower()]
-            if name_filter.strip() else eligible
-        )
-        if name_filter.strip():
-            st.caption(f'Showing {len(pool)} of {len(eligible)} eligible file(s) matching "{name_filter}".')
-
-        default_selected = [item.name for item in pool if required_contracts.looks_signed(item.name)]
-        selected_names = st.multiselect(
-            "Select files to ingest — 🖊 marks files whose name doesn't show a signed/executed "
-            "marker (still selectable, just worth a second look)",
-            options=[item.name for item in pool],
-            default=default_selected,
-            format_func=lambda n: n if required_contracts.looks_signed(n) else f"🖊 {n}",
-        )
-        if st.button("Ingest selected files", type="primary"):
-            selected_items = [i for i in listing if i.name in selected_names]
-            with st.spinner(f"Ingesting {len(selected_items)} file(s)…"):
-                results = ingest_selected_files(session, project, selected_items)
-                doc_ids = [r.doc_id for r in results if r.status in ("INGESTED", "UPDATED") and r.doc_id]
-                indexed_count = 0
-                if doc_ids:
-                    index_result = build_index_for_project(session, project, doc_ids=doc_ids, rebuild=True)
-                    indexed_count = index_result.indexed
-                    for err in index_result.errors:
-                        st.error(f"⚠️ Indexing failed: {err}")
-                signed_flags = {}
-                if doc_ids:
-                    schema = project.qualified_schema
-                    placeholders = ", ".join(["?"] * len(doc_ids))
-                    rows = session.sql(
-                        f"SELECT DOC_ID, FILE_NAME, RAW_TEXT FROM {schema}.RAW_DOCUMENTS WHERE DOC_ID IN ({placeholders})",
-                        params=doc_ids,
-                    ).collect()
-                    signed_flags = {r["DOC_ID"]: required_contracts.looks_signed(r["FILE_NAME"], r["RAW_TEXT"]) for r in rows}
-            for r in results:
-                fn = st.success if r.status in ("INGESTED", "UPDATED") else (
-                    st.info if r.status == "SKIPPED_DUPLICATE" else st.error)
-                if r.status in ("INGESTED", "UPDATED"):
-                    verb = "ingested" if r.status == "INGESTED" else "content changed, index refreshed"
-                    suffix = "" if signed_flags.get(r.doc_id, True) else \
-                        " ⚠️ no \"Signed\"/\"Executed\" marker found — double-check this is the right copy"
-                    fn(f"✅ {r.file_name} — {verb} (doc_id={r.doc_id}){suffix}")
-                elif r.status == "SKIPPED_DUPLICATE":
-                    fn(f"↪️ {r.file_name} — unchanged, skipped")
-                else:
-                    fn(f"❌ {r.file_name} — {r.error}")
-            if indexed_count:
-                st.success(
-                    f"Indexed {indexed_count} document(s) — link them to a contract number on "
-                    "the Contract Register page, then look them up on Contract Lookup."
-                )
 
 # ---------------------------------------------------------------------------
 with tab_index:

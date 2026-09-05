@@ -12,14 +12,13 @@ dependencies:
   # target version, in case warehouse runtime is ever revisited.
   - streamlit=1.50.0
   - pandas
-  # python-docx and reportlab (the Contract Summary Word/PDF exports) and
-  # smbprotocol (the network drive ingestion tab) are deliberately NOT
-  # listed here — all three are very unlikely to be resolvable from this
-  # account's Anaconda channel
-  # snapshot for warehouse-runtime Streamlit apps (the same class of
-  # failure openpyxl hit in this template's own reference deployment,
-  # which is why xlsx parsing there was rewritten to stdlib-only rather
-  # than fixed here). Since LEX runs on container runtime by default
-  # anyway (see pyproject.toml), this is only a real gap if warehouse
-  # runtime is ever revisited — the summary download button and network
-  # drive tab would both need a fallback or removal in that case.
+  # python-docx and reportlab (the Contract Summary Word/PDF exports) are
+  # deliberately NOT listed here — both are very unlikely to be
+  # resolvable from this account's Anaconda channel snapshot for
+  # warehouse-runtime Streamlit apps (the same class of failure openpyxl
+  # hit in this template's own reference deployment, which is why xlsx
+  # parsing there was rewritten to stdlib-only rather than fixed here).
+  # Since LEX runs on container runtime by default anyway (see
+  # pyproject.toml), this is only a real gap if warehouse runtime is ever
+  # revisited — the summary download buttons would need a fallback or
+  # removal in that case.
