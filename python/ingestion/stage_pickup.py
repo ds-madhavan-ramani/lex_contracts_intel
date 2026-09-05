@@ -105,7 +105,15 @@ def list_staged_files(session) -> List[StagedFile]:
     immediate parent folder. A file sitting at the stage root with no CW
     subfolder (an older or malformed upload) is skipped with a warning
     rather than guessed at — same principle as the module docstring's
-    auto-linking note: only proceed when the CW is known with certainty."""
+    auto-linking note: only proceed when the CW is known with certainty.
+
+    CONFIRMED on a live account: an internal stage's directory table does
+    not always auto-refresh the moment a new file is PUT — files were
+    visible via LIST but absent from DIRECTORY() until an explicit REFRESH.
+    Refreshing here on every call is cheap (a metadata-only operation) and
+    removes an entire class of "why didn't my new file show up" confusion,
+    at the cost of one extra statement per run."""
+    session.sql(f"ALTER STAGE {INBOX_STAGE} REFRESH").collect()
     rows = session.sql(f"SELECT RELATIVE_PATH FROM DIRECTORY(@{INBOX_STAGE})").collect()
     staged: List[StagedFile] = []
     for row in rows:

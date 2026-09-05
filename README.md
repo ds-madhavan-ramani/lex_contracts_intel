@@ -358,10 +358,17 @@ from this environment, though:
   at the zip root, matching Streamlit's own import layout) and pointing
   `IMPORTS` at that zip instead — Snowflake's documented, reliable way to
   import a multi-file/multi-package Python tree into a stored procedure.
-  One assumption remains genuinely unverified: `COPY FILES INTO <stage>
-  FROM <stage>` (stage-to-stage, used in `ingestion/stage_pickup.py` to
-  avoid a GET/PUT round trip) behaves as documented — it has a documented
-  fallback in that module's own docstring if it doesn't hold.
+  Also confirmed and fixed: `NETWORK_DRIVE_INBOX_STAGE`'s directory table
+  doesn't reliably auto-refresh the moment a new file is `PUT` — files
+  were visible via `LIST` but absent from `DIRECTORY()` (what
+  `list_staged_files()` queries) until an explicit `ALTER STAGE ...
+  REFRESH`. `list_staged_files()` now runs that refresh itself on every
+  call — cheap (metadata-only) and removes an entire class of "why didn't
+  my new file show up" confusion. One assumption remains genuinely
+  unverified: `COPY FILES INTO <stage> FROM <stage>` (stage-to-stage, used
+  in `ingestion/stage_pickup.py` to avoid a GET/PUT round trip) behaves as
+  documented — it has a documented fallback in that module's own docstring
+  if it doesn't hold.
 - The scheduled Task's *automatic* execution (as opposed to a manual
   `CALL RUN_LEX_STAGE_PICKUP()`) is separately unverified — `EXECUTE
   TASK` is commonly an `ACCOUNTADMIN`-only privilege to grant (like
