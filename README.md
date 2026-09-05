@@ -254,7 +254,10 @@ Open the app: Snowsight → **Streamlit** → `LEX_APP`.
   page. Pick a contract number, see its Executive Assessment and every
   section of the Contract Workspace Summary Template answered from
   history, click **View source** on any finding to open the citation
-  panel, and **Download summary (.docx)** for the filled-in template.
+  panel, and download the summary as **Word** or **PDF**. Both are served
+  from `contract_output_cache`'s stage cache — already produced by the
+  async stage-pickup Task or a prior extraction run — falling back to
+  building the file on the spot if nothing's cached yet.
 - **Data Sources** — three tabs: upload/sync the Required Contracts
   Register workbook; ingest contract PDFs/DOCX (upload or network drive,
   flagged if no signed/executed marker is found); manual index rebuild
@@ -300,6 +303,8 @@ robustness, and citation plumbing. What's actually new for LEX:
 | `ingestion/stage_pickup.py` + `sql/04_stage_pickup_task.sql` | A scheduled Snowflake Task that drains `NETWORK_DRIVE_INBOX_STAGE` (filled by the companion `lex_network_bridge` repo) into `RAW_DOCUMENTS` → linking → indexing → extraction, automatically. Auto-linking is safe here specifically because the CW number comes from the bridge's per-CW staging subfolder — a human already confirmed it by searching that folder — not a filename guess, which is what `contract_linking.suggest_cw_number()` deliberately never does unattended elsewhere in this codebase |
 | `citation_viewer.py` / `citation_panel_ui.py` | Presigned stage URLs + a hand-rolled client-side PDF.js viewer that best-effort highlights the cited passage in the original document |
 | `assets/Contract_Workspace_Summary_Template.docx` + `docx_report.py` | The team's actual Word template, filled in place (structure/styles preserved) rather than a bespoke document built from scratch |
+| `pdf_report.py` | The same Contract Workspace Summary content as a PDF, rendered independently with `reportlab` (pure Python, no LibreOffice/Word on the compute pool or in a stored procedure) rather than converting the `.docx` |
+| `contract_output_cache.py` + `CONTRACT_OUTPUT_STAGE` | Caches each contract's Word/PDF summary to a stage as soon as extraction finishes — Task-driven or manual — so download buttons serve a pre-built file instead of regenerating it on every page view; falls back to a live build on a cache miss |
 | **Contract Lookup** page (`Chat.py`, repurposed) | The primary end-user surface — enter a contract number, get history, cite, export |
 | **Contract Register** page | Admin: linking + verification workflow |
 
@@ -346,7 +351,7 @@ from this environment, though:
   unverified — only `GENERIC_STRING` secrets are confirmed working
   elsewhere in this codebase.
 - `sql/04_stage_pickup_task.sql` is genuinely unverified — no live Task,
-  Stream, or Python stored procedure to test against. Two specific
+  Stream, or Python stored procedure to test against. Three specific
   assumptions flagged in that file's own comments: (1) a stored
   procedure's `IMPORTS` clause given a stage *directory* resolves the
   same way Streamlit itself resolves `python/` (consistent with every
@@ -354,7 +359,17 @@ from this environment, though:
   confirmed for the stored-procedure mechanism specifically); (2) `COPY
   FILES INTO <stage> FROM <stage>` (stage-to-stage, used in
   `ingestion/stage_pickup.py` to avoid a GET/PUT round trip) behaves as
-  documented. Both have a documented fallback in place if they don't.
+  documented; (3) the procedure's `PACKAGES` clause can now resolve
+  `python-docx` and `reportlab` from this account's Anaconda channel (needed
+  for `contract_output_cache.py`'s Word/PDF caching, called at the end of
+  every Task-driven extraction run). All three have a documented fallback
+  in that file's own comments if they don't hold.
+- `pdf_report.py` renders the same fields/tables/bullets `docx_report.py`
+  does, independently, with `reportlab` — verified structurally (valid PDF
+  header, non-trivial size, builds without error against the full field
+  set including the empty-data edge case) but not visually proofed in a
+  PDF viewer from this environment, and not a pixel-for-pixel match of the
+  Word template's styling by design (see that module's own docstring).
 
 ## Open items
 

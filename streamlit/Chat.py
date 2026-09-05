@@ -6,7 +6,9 @@ Filename kept as Chat.py purely so pipeline/00_provision_project.ipynb's
 chat feature here. Enter/select a contract number and get its standard
 questions answered from History (CONTRACT_FIELD_EXTRACTS), laid out the
 same way as the team's own Contract Workspace Summary Template, with a
-citation panel on the side and a matching .docx export — the free-form
+citation panel on the side and matching .docx/.pdf exports (served from
+contract_output_cache's stage cache when the async pickup Task has
+already produced them; built live otherwise) — the free-form
 question-answering engine this was originally built around
 (query_engine.search()) is not a user-facing feature right now; it's still
 what contract_extraction.py runs under the hood.
@@ -28,9 +30,9 @@ from snowflake_session import get_session
 from config import load_project, list_active_projects
 import contract_linking
 import contract_extraction
+import contract_output_cache
 import required_contracts
 from citation_panel_ui import render_citation_panel
-from docx_report import build_contract_docx
 
 st.set_page_config(page_title="Contract Lookup — LEX", page_icon="⚖️", layout="wide")
 
@@ -113,6 +115,7 @@ if status.extracted_field_count == 0:
     if st.button("Run extraction now", type="primary"):
         with st.spinner("Answering the standard questions…"):
             contract_extraction.extract_stock_fields_for_contract(session, project, status.contract_id)
+            contract_output_cache.cache_contract_outputs(session, project, status.contract_id)
         st.rerun()
     st.stop()
 
@@ -124,6 +127,7 @@ if not status.is_extraction_current:
     if st.button("Re-run extraction", type="primary"):
         with st.spinner("Re-answering the standard questions…"):
             contract_extraction.extract_stock_fields_for_contract(session, project, status.contract_id)
+            contract_output_cache.cache_contract_outputs(session, project, status.contract_id)
         st.rerun()
 
 contract = contract_linking.get_contract(session, project, status.contract_id)
@@ -131,15 +135,24 @@ fields_list = contract_extraction.get_contract_fields(session, project, status.c
 fields = {f["FIELD_KEY"]: f for f in fields_list}
 variations = contract_linking.get_significant_variations(session, project, status.contract_id)
 
-header_col, action_col = st.columns([4, 1])
+header_col, docx_col, pdf_col = st.columns([4, 1, 1])
 header_col.subheader(contract["CONTRACT_TITLE"] or contract["CW_NUMBER"])
 header_col.caption(contract["CW_NUMBER"])
 
-docx_bytes = build_contract_docx(session, project, status.contract_id)
-action_col.download_button(
-    "⬇ Download summary (.docx)", data=docx_bytes,
+# Served from the cache the stage-pickup Task (or the extraction buttons
+# above) already populated; falls back to building it live if nothing's
+# cached yet — see contract_output_cache.get_or_build_output.
+docx_col.download_button(
+    "⬇ Word (.docx)",
+    data=contract_output_cache.get_or_build_output(session, project, status.contract_id, "docx"),
     file_name=f"{contract['CW_NUMBER']}_Contract_Workspace_Summary.docx",
     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+)
+pdf_col.download_button(
+    "⬇ PDF",
+    data=contract_output_cache.get_or_build_output(session, project, status.contract_id, "pdf"),
+    file_name=f"{contract['CW_NUMBER']}_Contract_Workspace_Summary.pdf",
+    mime="application/pdf",
 )
 
 CONFIDENCE_BADGE = {

@@ -20,6 +20,12 @@ dependencies = [
     # Contract Workspace Summary Template (assets/*.docx) with extracted
     # values for the downloadable summary.
     "python-docx>=1.1.0",
+    # Pure Python, no system dependencies — used by pdf_report.py to
+    # render the PDF version of the same Contract Workspace Summary (the
+    # download-button counterpart to the .docx export above; also called
+    # from contract_output_cache.py by the stage-pickup stored procedure —
+    # see sql/04_stage_pickup_task.sql's PACKAGES note).
+    "reportlab>=4.0.0",
     # SMB2/3 client (via its smbclient submodule) for the network drive
     # ingestion tab — LEX's contracts library is a genuine on-prem file
     # share, not SharePoint, so this replaces what would otherwise be a
