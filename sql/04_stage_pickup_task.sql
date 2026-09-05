@@ -11,8 +11,23 @@
 -- MEDSCOMA.APP_CATALOG.LEX_APP_STAGE, so it needs to exist first.
 --
 -- UNVERIFIED: written without a live Snowflake account to test against.
--- Two things flagged below as the most likely places this needs
+-- Three things flagged below as the most likely places this needs
 -- adjusting on first real run:
+--   0. PACKAGES now includes 'python-docx' and 'reportlab' (added for
+--      Phase 3 output caching — python/contract_output_cache.py, called
+--      at the end of run_stage_pickup(), builds a Word/PDF summary via
+--      docx_report.py/pdf_report.py from inside this procedure). Both are
+--      pure-Python with no system dependencies, and reportlab in
+--      particular is common enough in Snowflake's own stored-procedure
+--      PDF-generation examples that it's very likely resolvable from this
+--      account's Anaconda channel — but that's not independently
+--      confirmed. If CREATE OR REPLACE PROCEDURE fails to resolve either
+--      package, remove the contract_output_cache.cache_contract_outputs()
+--      call from stage_pickup.py's _run_extraction_for_contracts (reverting
+--      the Task to extraction-only) and rely on Streamlit's own calls to
+--      contract_output_cache instead — python-docx already runs fine
+--      there today (container runtime), and reportlab would just need
+--      adding to streamlit/pyproject.toml and requirements.txt.
 --   1. IMPORTS = ('@MEDSCOMA.APP_CATALOG.LEX_APP_STAGE/python/') assumes
 --      Snowflake's Python stored-procedure IMPORTS mechanism, given a
 --      stage *directory* path, extracts it the same way the Streamlit
@@ -58,13 +73,14 @@ CREATE STREAM IF NOT EXISTS MEDSCOMA.DATA_LEX.NETWORK_DRIVE_INBOX_STREAM
 --    the Streamlit app itself runs on (staged by the "Deploy the
 --    Streamlit app" notebook cell), so stage_pickup.py's logic — and
 --    everything it in turn calls (contract_linking, contract_extraction,
---    index_builder) — is never duplicated here as inline SQL/Python.
+--    index_builder, and now contract_output_cache for the Word/PDF
+--    summary cache) — is never duplicated here as inline SQL/Python.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE PROCEDURE MEDSCOMA.APP_CATALOG.RUN_LEX_STAGE_PICKUP()
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
-PACKAGES = ('snowflake-snowpark-python')
+PACKAGES = ('snowflake-snowpark-python', 'python-docx', 'reportlab')
 IMPORTS = ('@MEDSCOMA.APP_CATALOG.LEX_APP_STAGE/python/')
 HANDLER = 'run'
 AS

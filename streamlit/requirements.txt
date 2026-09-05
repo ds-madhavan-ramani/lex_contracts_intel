@@ -2,4 +2,5 @@ snowflake-snowpark-python>=1.20.0
 streamlit==1.50.0
 pandas>=2.2.0
 python-docx>=1.1.0
+reportlab>=4.0.0
 smbprotocol>=1.15.0

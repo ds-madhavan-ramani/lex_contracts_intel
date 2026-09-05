@@ -107,3 +107,14 @@ CREATE TABLE IF NOT EXISTS CONTRACT_FIELD_EXTRACTS (
     VERIFIED_AT                       TIMESTAMP_NTZ,
     UNIQUE (CONTRACT_ID, FIELD_KEY)
 );
+
+-- Cached Word/PDF Contract Workspace Summary outputs — see
+-- python/contract_output_cache.py. Populated automatically whenever
+-- extraction runs for a contract (the stage-pickup Task, or the manual
+-- "run/re-run extraction" buttons), one folder per CW number:
+-- @CONTRACT_OUTPUT_STAGE/<CW_NUMBER>/Contract_Workspace_Summary.{docx,pdf}.
+-- A download button reads from here first and only builds the file live
+-- as a fallback (e.g. before this cache existed, or a caching attempt
+-- failed) — see contract_output_cache.get_or_build_output.
+CREATE STAGE IF NOT EXISTS CONTRACT_OUTPUT_STAGE
+    ENCRYPTION = (TYPE = 'SNOWFLAKE_SSE');

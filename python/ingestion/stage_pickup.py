@@ -241,13 +241,21 @@ def run_stage_pickup(session, project_code: str = "LEX") -> str:
 
 def _run_extraction_for_contracts(session, project: ProjectConfig, contract_ids: Set[int]) -> List[str]:
     import contract_extraction
+    import contract_output_cache
     errors = []
     for contract_id in contract_ids:
         try:
+            # extract_stock_fields_for_contract already (re)generates the
+            # overview/recommended-actions/scorecard synthesis internally
+            # once every stock field is extracted — calling those three
+            # again here would just repeat the same Cortex calls a second
+            # time for no benefit.
             contract_extraction.extract_stock_fields_for_contract(session, project, contract_id)
-            contract_extraction.generate_contract_overview(session, project, contract_id)
-            contract_extraction.generate_recommended_actions(session, project, contract_id)
-            contract_extraction.generate_classification_scorecard(session, project, contract_id)
+            # Phase 3: cache this contract's Word/PDF summary now that its
+            # fields are current — see contract_output_cache's own
+            # docstring for the PACKAGES caveat this adds to the stored
+            # procedure that calls this function.
+            contract_output_cache.cache_contract_outputs(session, project, contract_id)
         except Exception as e:  # noqa: BLE001 — one contract's extraction failing shouldn't block the rest
             logger.exception("EVENT=STAGE_PICKUP_EXTRACTION_FAILED contract_id=%s", contract_id)
             errors.append(f"contract_id={contract_id}: {e}")

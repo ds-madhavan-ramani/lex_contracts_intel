@@ -21,9 +21,9 @@ import streamlit as st
 from snowflake_session import get_session
 import contract_linking
 import contract_extraction
+import contract_output_cache
 import required_contracts
 from citation_panel_ui import render_citation_panel
-from docx_report import build_contract_docx
 
 st.set_page_config(page_title="Contract Register — LEX", page_icon="📋", layout="wide")
 
@@ -123,7 +123,9 @@ top_col1, top_col2 = st.columns([3, 1])
 top_col1.subheader(f"Contracts ({len(families)})")
 if top_col2.button("Run extraction for all contracts", type="primary", disabled=not families):
     with st.spinner(f"Running the standard questions across {len(families)} contract(s)…"):
-        contract_extraction.extract_stock_fields_for_all_contracts(session, project)
+        results = contract_extraction.extract_stock_fields_for_all_contracts(session, project)
+        for touched_contract_id in results:
+            contract_output_cache.cache_contract_outputs(session, project, touched_contract_id)
     st.success("Extraction complete.")
     st.rerun()
 
@@ -150,17 +152,29 @@ for family in families:
                               key=f"extract_{family.contract_id}", type="primary"):
             with st.spinner("Running the standard questions…"):
                 contract_extraction.extract_stock_fields_for_contract(session, project, family.contract_id)
+                contract_output_cache.cache_contract_outputs(session, project, family.contract_id)
             st.success("Extraction complete.")
             st.rerun()
 
         contract_row = contract_linking.get_contract(session, project, family.contract_id)
         if contract_row:
-            download_col.download_button(
-                "⬇ Download summary (.docx)",
-                data=build_contract_docx(session, project, family.contract_id),
+            # Served from the cache the stage-pickup Task (or the button
+            # above) already populated; falls back to building it live if
+            # nothing's cached yet — see contract_output_cache.get_or_build_output.
+            docx_dl_col, pdf_dl_col = download_col.columns(2)
+            docx_dl_col.download_button(
+                "⬇ Word",
+                data=contract_output_cache.get_or_build_output(session, project, family.contract_id, "docx"),
                 file_name=f"{family.cw_number}_Contract_Workspace_Summary.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                key=f"download_{family.contract_id}",
+                key=f"download_docx_{family.contract_id}",
+            )
+            pdf_dl_col.download_button(
+                "⬇ PDF",
+                data=contract_output_cache.get_or_build_output(session, project, family.contract_id, "pdf"),
+                file_name=f"{family.cw_number}_Contract_Workspace_Summary.pdf",
+                mime="application/pdf",
+                key=f"download_pdf_{family.contract_id}",
             )
 
         if contract_row and contract_row.get("OVERVIEW_SUMMARY"):
