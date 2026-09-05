@@ -376,11 +376,18 @@ from this environment, though:
   `ALTER SESSION SET USE_CACHED_RESULT = FALSE` — turned out to be a
   second unsupported statement type inside a Python stored procedure
   ("Unsupported statement type 'ALTER_SESSION'"), same class of
-  restriction as `CREATE TEMPORARY TABLE` above; fixed by passing
-  `statement_params={"use_cached_result": False}` to that one query's
-  `.collect()` instead — a per-call Snowpark/connector parameter, not a
-  SQL statement, so it isn't subject to the same restriction.
-  One assumption remains genuinely
+  restriction as `CREATE TEMPORARY TABLE` above. The next attempt —
+  `statement_params={"use_cached_result": False}` on that one query's
+  `.collect()` — ran without error but, confirmed on a live account,
+  still didn't actually bypass the cache: same role owning both the
+  procedure and the stage, `REFRESH` run immediately before it, yet still
+  0 rows while a plain `LIST @stage` in the same moment confirmed real
+  files were there. `list_staged_files()` now sidesteps the whole
+  question of which cache-control mechanism actually works in this
+  execution context by appending a fresh UUID SQL comment to the query
+  text on every call, so there is never a pre-existing cached result to
+  serve, by construction, regardless of the exact caching mechanics at
+  play. One assumption remains genuinely
   unverified: `COPY FILES INTO <stage> FROM <stage>` (stage-to-stage, used
   in `ingestion/stage_pickup.py` to avoid a GET/PUT round trip) behaves as
   documented — it has a documented fallback in that module's own docstring
