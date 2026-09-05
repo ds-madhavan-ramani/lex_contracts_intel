@@ -333,20 +333,23 @@ from this environment, though:
   template is ever edited in a way that removes one of those markers —
   but a *cosmetic* template edit that keeps every marker intact is
   untested beyond the one template file bundled in `assets/`.
-- `sql/04_stage_pickup_task.sql` is genuinely unverified — no live Task,
-  Stream, or Python stored procedure to test against. Three specific
-  assumptions flagged in that file's own comments: (1) a stored
-  procedure's `IMPORTS` clause given a stage *directory* resolves the
-  same way Streamlit itself resolves `python/` (consistent with every
-  absolute import already in this codebase, but not independently
-  confirmed for the stored-procedure mechanism specifically); (2) `COPY
-  FILES INTO <stage> FROM <stage>` (stage-to-stage, used in
-  `ingestion/stage_pickup.py` to avoid a GET/PUT round trip) behaves as
-  documented; (3) the procedure's `PACKAGES` clause can now resolve
-  `python-docx` and `reportlab` from this account's Anaconda channel (needed
-  for `contract_output_cache.py`'s Word/PDF caching, called at the end of
-  every Task-driven extraction run). All three have a documented fallback
-  in that file's own comments if they don't hold.
+- `sql/04_stage_pickup_task.sql`: two assumptions confirmed on a live
+  account, one bug found and fixed in the process. Confirmed: the
+  procedure's `PACKAGES` clause resolves `python-docx` and `reportlab`
+  from this account's Anaconda channel fine (needed for
+  `contract_output_cache.py`'s Word/PDF caching). Fixed: `CREATE
+  TEMPORARY TABLE` inside a Python stored procedure raises "Unsupported
+  statement type 'temporary TABLE'" — the stream-consumption step now
+  uses a permanent table (`CREATE OR REPLACE`, so it never accumulates;
+  it lives in `DATA_LEX` so project teardown removes it automatically).
+  Two assumptions remain genuinely unverified: (1) a stored procedure's
+  `IMPORTS` clause given a stage *directory* resolves the same way
+  Streamlit itself resolves `python/` (consistent with every absolute
+  import already in this codebase, but not independently confirmed for
+  the stored-procedure mechanism specifically); (2) `COPY FILES INTO
+  <stage> FROM <stage>` (stage-to-stage, used in `ingestion/stage_pickup.py`
+  to avoid a GET/PUT round trip) behaves as documented. Both have a
+  documented fallback in that file's own comments if they don't hold.
 - `pdf_report.py` renders the same fields/tables/bullets `docx_report.py`
   does, independently, with `reportlab` — verified structurally (valid PDF
   header, non-trivial size, builds without error against the full field

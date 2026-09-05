@@ -10,24 +10,15 @@
 -- procedure below imports the same python/ tree that cell just staged to
 -- MEDSCOMA.APP_CATALOG.LEX_APP_STAGE, so it needs to exist first.
 --
--- UNVERIFIED: written without a live Snowflake account to test against.
--- Three things flagged below as the most likely places this needs
--- adjusting on first real run:
---   0. PACKAGES now includes 'python-docx' and 'reportlab' (added for
---      Phase 3 output caching — python/contract_output_cache.py, called
---      at the end of run_stage_pickup(), builds a Word/PDF summary via
---      docx_report.py/pdf_report.py from inside this procedure). Both are
---      pure-Python with no system dependencies, and reportlab in
---      particular is common enough in Snowflake's own stored-procedure
---      PDF-generation examples that it's very likely resolvable from this
---      account's Anaconda channel — but that's not independently
---      confirmed. If CREATE OR REPLACE PROCEDURE fails to resolve either
---      package, remove the contract_output_cache.cache_contract_outputs()
---      call from stage_pickup.py's _run_extraction_for_contracts (reverting
---      the Task to extraction-only) and rely on Streamlit's own calls to
---      contract_output_cache instead — python-docx already runs fine
---      there today (container runtime), and reportlab would just need
---      adding to streamlit/pyproject.toml and requirements.txt.
+-- CONFIRMED on a live account: PACKAGES resolves 'python-docx' and
+-- 'reportlab' fine (CREATE OR REPLACE PROCEDURE succeeds, and CALL
+-- RUN_LEX_STAGE_PICKUP() starts executing) — no PACKAGES-related fallback
+-- needed. Also confirmed: CREATE TEMPORARY TABLE is not usable inside a
+-- Python stored procedure ("Unsupported statement type 'temporary
+-- TABLE'") — fixed below by dropping TEMPORARY.
+--
+-- Still UNVERIFIED — two things flagged below as the most likely places
+-- this needs adjusting next:
 --   1. IMPORTS = ('@MEDSCOMA.APP_CATALOG.LEX_APP_STAGE/python/') assumes
 --      Snowflake's Python stored-procedure IMPORTS mechanism, given a
 --      stage *directory* path, extracts it the same way the Streamlit
@@ -97,8 +88,15 @@ def run(session):
     # here, since the actual processing below re-lists the stage's full
     # directory table independently (see stage_pickup.py's own docstring
     # for why that redundancy is deliberate).
+    #
+    # CONFIRMED on a live account: TEMPORARY is not usable here — "Unsupported
+    # statement type 'temporary TABLE'" from inside a Python stored procedure.
+    # A permanent table works fine; CREATE OR REPLACE keeps it from
+    # accumulating (each run just overwrites the same single-purpose table),
+    # and it lives inside DATA_LEX so TEARDOWN_PROJECT('LEX', ...) removes it
+    # along with everything else in that schema — no separate cleanup needed.
     session.sql(
-        "CREATE OR REPLACE TEMPORARY TABLE MEDSCOMA.DATA_LEX._STAGE_PICKUP_STREAM_SNAPSHOT "
+        "CREATE OR REPLACE TABLE MEDSCOMA.DATA_LEX._STAGE_PICKUP_STREAM_SNAPSHOT "
         "AS SELECT * FROM MEDSCOMA.DATA_LEX.NETWORK_DRIVE_INBOX_STREAM"
     ).collect()
 
