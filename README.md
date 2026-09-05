@@ -333,23 +333,39 @@ from this environment, though:
   template is ever edited in a way that removes one of those markers —
   but a *cosmetic* template edit that keeps every marker intact is
   untested beyond the one template file bundled in `assets/`.
-- `sql/04_stage_pickup_task.sql`: two assumptions confirmed on a live
-  account, one bug found and fixed in the process. Confirmed: the
+- `sql/04_stage_pickup_task.sql`: one assumption confirmed on a live
+  account, two bugs found and fixed in the process. Confirmed: the
   procedure's `PACKAGES` clause resolves `python-docx` and `reportlab`
   from this account's Anaconda channel fine (needed for
-  `contract_output_cache.py`'s Word/PDF caching). Fixed: `CREATE
+  `contract_output_cache.py`'s Word/PDF caching). Fixed: (1) `CREATE
   TEMPORARY TABLE` inside a Python stored procedure raises "Unsupported
   statement type 'temporary TABLE'" — the stream-consumption step now
   uses a permanent table (`CREATE OR REPLACE`, so it never accumulates;
-  it lives in `DATA_LEX` so project teardown removes it automatically).
-  Two assumptions remain genuinely unverified: (1) a stored procedure's
-  `IMPORTS` clause given a stage *directory* resolves the same way
-  Streamlit itself resolves `python/` (consistent with every absolute
-  import already in this codebase, but not independently confirmed for
-  the stored-procedure mechanism specifically); (2) `COPY FILES INTO
-  <stage> FROM <stage>` (stage-to-stage, used in `ingestion/stage_pickup.py`
-  to avoid a GET/PUT round trip) behaves as documented. Both have a
-  documented fallback in that file's own comments if they don't hold.
+  it lives in `DATA_LEX` so project teardown removes it automatically);
+  (2) `IMPORTS` given a bare stage *directory* does **not** flatten that
+  directory's contents onto `sys.path` the way Streamlit's own
+  `sys.path.insert()` does — confirmed as `ModuleNotFoundError: No module
+  named 'ingestion'` on the very first import. Fixed by having the "Set
+  up the stage pickup task" notebook cell zip `python/`'s contents (files
+  at the zip root, matching Streamlit's own import layout) and pointing
+  `IMPORTS` at that zip instead — Snowflake's documented, reliable way to
+  import a multi-file/multi-package Python tree into a stored procedure.
+  One assumption remains genuinely unverified: `COPY FILES INTO <stage>
+  FROM <stage>` (stage-to-stage, used in `ingestion/stage_pickup.py` to
+  avoid a GET/PUT round trip) behaves as documented — it has a documented
+  fallback in that module's own docstring if it doesn't hold.
+- The scheduled Task's *automatic* execution (as opposed to a manual
+  `CALL RUN_LEX_STAGE_PICKUP()`) is separately unverified — `EXECUTE
+  TASK` is commonly an `ACCOUNTADMIN`-only privilege to grant (like
+  `CREATE ROLE` was for this account's `ADVANCEDANALYTICS`), and a task
+  that's `CREATE`d and `RESUME`d without it will simply never fire on its
+  own schedule, with no error surfaced anywhere obvious. Confirm with
+  `SHOW TASKS LIKE 'LEX_STAGE_PICKUP_TASK'` (check `state` is `started`)
+  and `SELECT * FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY(TASK_NAME =>
+  'LEX_STAGE_PICKUP_TASK')) ORDER BY SCHEDULED_TIME DESC` (confirms it has
+  actually fired) once a new file is staged — if it never appears, hand
+  `GRANT EXECUTE TASK ON ACCOUNT TO ROLE ADVANCEDANALYTICS;` to whoever
+  holds `ACCOUNTADMIN`.
 - `pdf_report.py` renders the same fields/tables/bullets `docx_report.py`
   does, independently, with `reportlab` — verified structurally (valid PDF
   header, non-trivial size, builds without error against the full field

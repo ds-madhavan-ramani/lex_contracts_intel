@@ -6,32 +6,32 @@
 -- python/ingestion/stage_pickup.py's run_stage_pickup().
 --
 -- Run from pipeline/00_provision_project.ipynb's "Set up the stage pickup
--- task" cell, AFTER the "Deploy the Streamlit app" cell — the stored
--- procedure below imports the same python/ tree that cell just staged to
--- MEDSCOMA.APP_CATALOG.LEX_APP_STAGE, so it needs to exist first.
+-- task" cell, AFTER the "Deploy the Streamlit app" cell — that cell now
+-- also zips python/'s contents and stages the zip this procedure's
+-- IMPORTS references (see below), so it needs to run first.
 --
 -- CONFIRMED on a live account: PACKAGES resolves 'python-docx' and
 -- 'reportlab' fine (CREATE OR REPLACE PROCEDURE succeeds, and CALL
 -- RUN_LEX_STAGE_PICKUP() starts executing) — no PACKAGES-related fallback
--- needed. Also confirmed: CREATE TEMPORARY TABLE is not usable inside a
--- Python stored procedure ("Unsupported statement type 'temporary
--- TABLE'") — fixed below by dropping TEMPORARY.
+-- needed. Also confirmed and fixed:
+--   1. CREATE TEMPORARY TABLE is not usable inside a Python stored
+--      procedure ("Unsupported statement type 'temporary TABLE'") — fixed
+--      below by dropping TEMPORARY.
+--   2. IMPORTS given a bare stage *directory* path
+--      (`@LEX_APP_STAGE/python/`) does NOT flatten that directory's
+--      contents onto sys.path the way Streamlit's own
+--      sys.path.insert() does — confirmed on a live account as
+--      `ModuleNotFoundError: No module named 'ingestion'` on the very
+--      first import. Fixed by having the notebook cell zip python/'s
+--      contents (files at the zip ROOT — config.py, ingestion/stage_pickup.py,
+--      etc., no extra 'python/' folder inside) and referencing that zip
+--      here instead — Snowflake's documented, reliable way to import a
+--      multi-file/multi-package Python tree into a stored procedure.
 --
--- Still UNVERIFIED — two things flagged below as the most likely places
--- this needs adjusting next:
---   1. IMPORTS = ('@MEDSCOMA.APP_CATALOG.LEX_APP_STAGE/python/') assumes
---      Snowflake's Python stored-procedure IMPORTS mechanism, given a
---      stage *directory* path, extracts it the same way the Streamlit
---      app itself resolves these same modules (python/config.py ->
---      `import config`, python/ingestion/stage_pickup.py -> `from
---      ingestion import stage_pickup`) — consistent with every existing
---      absolute import in this codebase, but not independently confirmed
---      for the stored-procedure IMPORTS mechanism specifically. If it
---      doesn't resolve, list each required file/subdirectory as its own
---      IMPORTS entry instead of the single directory reference.
---   2. COPY FILES INTO <stage> FROM <stage> (used inside stage_pickup.py
---      for the stage-to-stage file copy) is assumed to work as documented;
---      see that module's own docstring for the GET/PUT fallback if not.
+-- Still UNVERIFIED: COPY FILES INTO <stage> FROM <stage> (used inside
+-- stage_pickup.py for the stage-to-stage file copy) is assumed to work as
+-- documented; see that module's own docstring for the GET/PUT fallback if
+-- not.
 -- ============================================================================
 
 USE ROLE ADVANCEDANALYTICS;
@@ -61,18 +61,20 @@ CREATE STREAM IF NOT EXISTS MEDSCOMA.DATA_LEX.NETWORK_DRIVE_INBOX_STREAM
 
 -- ----------------------------------------------------------------------------
 -- 3. The stored procedure the Task calls. Imports the same python/ tree
---    the Streamlit app itself runs on (staged by the "Deploy the
---    Streamlit app" notebook cell), so stage_pickup.py's logic — and
---    everything it in turn calls (contract_linking, contract_extraction,
---    index_builder, and now contract_output_cache for the Word/PDF
---    summary cache) — is never duplicated here as inline SQL/Python.
+--    the Streamlit app itself runs on, packaged as a zip (see the "Set up
+--    the stage pickup task" notebook cell — a bare stage directory
+--    reference doesn't work here, see this file's header comment), so
+--    stage_pickup.py's logic — and everything it in turn calls
+--    (contract_linking, contract_extraction, index_builder, and now
+--    contract_output_cache for the Word/PDF summary cache) — is never
+--    duplicated here as inline SQL/Python.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE PROCEDURE MEDSCOMA.APP_CATALOG.RUN_LEX_STAGE_PICKUP()
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
 PACKAGES = ('snowflake-snowpark-python', 'python-docx', 'reportlab')
-IMPORTS = ('@MEDSCOMA.APP_CATALOG.LEX_APP_STAGE/python/')
+IMPORTS = ('@MEDSCOMA.APP_CATALOG.LEX_APP_STAGE/lex_python_imports.zip')
 HANDLER = 'run'
 AS
 $$
