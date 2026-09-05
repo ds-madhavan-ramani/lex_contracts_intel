@@ -372,8 +372,14 @@ from this environment, though:
   write, so it isn't guaranteed to invalidate a cached result from an
   earlier identical query under that same role, even though a different
   role's session sees the fresh data immediately. `list_staged_files()`
-  now also runs `ALTER SESSION SET USE_CACHED_RESULT = FALSE` before
-  listing, so every call re-reads live state regardless of caching.
+  now also bypasses the cache for that one query. The obvious way —
+  `ALTER SESSION SET USE_CACHED_RESULT = FALSE` — turned out to be a
+  second unsupported statement type inside a Python stored procedure
+  ("Unsupported statement type 'ALTER_SESSION'"), same class of
+  restriction as `CREATE TEMPORARY TABLE` above; fixed by passing
+  `statement_params={"use_cached_result": False}` to that one query's
+  `.collect()` instead — a per-call Snowpark/connector parameter, not a
+  SQL statement, so it isn't subject to the same restriction.
   One assumption remains genuinely
   unverified: `COPY FILES INTO <stage> FROM <stage>` (stage-to-stage, used
   in `ingestion/stage_pickup.py` to avoid a GET/PUT round trip) behaves as
