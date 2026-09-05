@@ -379,15 +379,32 @@ from this environment, though:
   restriction as `CREATE TEMPORARY TABLE` above. The next attempt —
   `statement_params={"use_cached_result": False}` on that one query's
   `.collect()` — ran without error but, confirmed on a live account,
-  still didn't actually bypass the cache: same role owning both the
-  procedure and the stage, `REFRESH` run immediately before it, yet still
-  0 rows while a plain `LIST @stage` in the same moment confirmed real
-  files were there. `list_staged_files()` now sidesteps the whole
-  question of which cache-control mechanism actually works in this
-  execution context by appending a fresh UUID SQL comment to the query
-  text on every call, so there is never a pre-existing cached result to
-  serve, by construction, regardless of the exact caching mechanics at
-  play. One assumption remains genuinely
+  still didn't fix the "0 files found" symptom, which was the first clue
+  the diagnosis was wrong. `list_staged_files()` was then made to append a
+  fresh UUID SQL comment to the query text on every call, guaranteeing no
+  pre-existing cached result could ever be served — and the symptom
+  *still* didn't change, which, combined with a live account confirming
+  `DIRECTORY()` returns the correct rows both from a plain worksheet and
+  from a minimal isolated stored procedure, proved conclusively that
+  caching was never the cause. **The actual root cause**: files were
+  landing at the inbox stage's ROOT, with no `<CW_NUMBER>/` subfolder at
+  all — `list_staged_files()`'s own deliberate "skip a file with no CW
+  folder rather than guess" safety check was filtering out every file,
+  correctly by its own logic, which is what produced "0 files found" even
+  though `DIRECTORY()` was returning real rows the whole time. This
+  recurred even though the CW-subfolder staging convention was already
+  fixed in the companion `lex_network_bridge` repo, most likely because
+  that fix doesn't cover every one of the bridge tool's upload paths (its
+  browser app has a human pick the CW folder; its CLI has a "best-effort
+  regex fallback" that can miss). Fixed here defensively: a root-level
+  file whose name starts with `CW<digits> -` (the bridge tool's own
+  filename convention) is now treated as reliably CW-attributed as a
+  folder name would be, and is moved into the matching subfolder
+  automatically before being picked up — a root file that doesn't match
+  this pattern is still skipped with a warning rather than guessed at.
+  The cache-busting UUID comment stays in place; it's cheap and defends
+  against the theoretical caching failure mode even though it turned out
+  not to be the actual bug this time. One assumption remains genuinely
   unverified: `COPY FILES INTO <stage> FROM <stage>` (stage-to-stage, used
   in `ingestion/stage_pickup.py` to avoid a GET/PUT round trip) behaves as
   documented — it has a documented fallback in that module's own docstring
