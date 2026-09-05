@@ -32,6 +32,22 @@ Called from a scheduled Snowflake Task (see sql/04_stage_pickup_task.sql)
 via run_stage_pickup(), but every function here also runs standalone from
 a notebook cell or worksheet for manual/ad hoc use.
 
+The inbox drains itself: a file is REMOVEd from NETWORK_DRIVE_INBOX_STAGE
+once it's fully handled (INGESTED, UPDATED, or SKIPPED_DUPLICATE) — see
+_remove_from_inbox. Without this, list_staged_files() would keep re-
+listing every file ever staged on every Task tick forever (its directory-
+table query has no "already handled" filter), which would re-run COPY
+FILES + AI_PARSE_DOCUMENT — the actual OCR/parsing cost — on already-
+processed files every schedule tick indefinitely. The SOURCE_HASH check
+against RAW_DOCUMENTS still prevents a duplicate row or a wasted
+extraction re-run even without this, but does nothing to avoid repeating
+the parse itself, which is what removal actually stops. A FAILED file
+(parse error, text too short) is deliberately left in the inbox so the
+next tick retries it rather than losing it silently — a file stuck
+FAILED needs a human to look at it, not indefinite silent retries either,
+so check PROJECT_SYNC_LOG / a run's returned summary for a persistently
+failing file.
+
 DOC_ROLE heuristic: a file's role (BASE vs. VARIATION/EXTENSION/etc.)
 can't be determined automatically from a bare filename in general, so the
 first document linked to a given contract in a run is recorded as BASE
@@ -160,6 +176,7 @@ def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFil
             if existing and existing[0]["SOURCE_HASH"] == source_hash:
                 results.append(PickupResult(item.file_name, item.cw_number, "SKIPPED_DUPLICATE",
                                              doc_id=existing[0]["DOC_ID"]))
+                _remove_from_inbox(session, item)
                 continue
 
             session.sql(
@@ -192,9 +209,16 @@ def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFil
             log_event(logger, "STAGE_PICKUP_FILE", project.project_code,
                       file=item.file_name, cw=item.cw_number, status=status, doc_role=doc_role)
 
+            _remove_from_inbox(session, item)
+
         except Exception as e:  # noqa: BLE001 — one bad file shouldn't abort the whole run
             logger.exception("EVENT=STAGE_PICKUP_ERROR file=%s cw=%s", item.file_name, item.cw_number)
             results.append(PickupResult(item.file_name, item.cw_number, "FAILED", error=str(e)))
+            # Deliberately NOT removed from the inbox — left in place so a
+            # FAILED file (e.g. a transient parse error) is retried on the
+            # next Task tick rather than silently lost. See this module's
+            # docstring on why a stuck FAILED file needs a human to look
+            # rather than retrying forever unattended.
 
     _log_sync_run(session, project, results)
     return results
@@ -260,6 +284,22 @@ def _run_extraction_for_contracts(session, project: ProjectConfig, contract_ids:
             logger.exception("EVENT=STAGE_PICKUP_EXTRACTION_FAILED contract_id=%s", contract_id)
             errors.append(f"contract_id={contract_id}: {e}")
     return errors
+
+
+def _remove_from_inbox(session, item: StagedFile) -> None:
+    """Deletes a successfully-processed file from NETWORK_DRIVE_INBOX_STAGE.
+    Without this, list_staged_files() would keep re-listing every file
+    ever staged on every Task tick forever (its directory-table query has
+    no "already handled" filter — it lists whatever is physically sitting
+    in the stage), which would re-run COPY FILES + AI_PARSE_DOCUMENT
+    (the OCR step) on already-processed files every 5 minutes indefinitely.
+    The SOURCE_HASH check further down still prevents a duplicate
+    RAW_DOCUMENTS row or a wasted extraction re-run in that scenario, but
+    does nothing to avoid the repeated OCR cost — this is what actually
+    stops that. Called for every non-FAILED outcome (INGESTED, UPDATED,
+    SKIPPED_DUPLICATE); a FAILED file is deliberately left in place so the
+    next Task tick retries it rather than silently losing it."""
+    session.sql(f"REMOVE @{INBOX_STAGE}/{item.relative_path}").collect()
 
 
 def _extract_text(parse_result) -> str:
