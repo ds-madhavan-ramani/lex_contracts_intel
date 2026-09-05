@@ -19,9 +19,9 @@ did before this module existed.
 LEX-specific: not part of the generic project-llm-wiki template.
 
 UNVERIFIED: session.file.put_stream/get_stream against a stage in this
-form is already used elsewhere in this codebase (ingestion/
-network_drive_ingest.py, ingestion/stage_pickup.py) and is assumed to
-behave the same way here. What IS new: this module's write path now also
+form is already used elsewhere in this codebase (ingestion/file_ingest.py,
+ingestion/stage_pickup.py) and is assumed to behave the same way here.
+What IS new: this module's write path now also
 runs inside the stage-pickup stored procedure (sql/04_stage_pickup_task.sql),
 which needs 'python-docx' and 'reportlab' added to that procedure's
 PACKAGES list for docx_report.py/pdf_report.py to import there. Both are

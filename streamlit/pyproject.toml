@@ -26,12 +26,4 @@ dependencies = [
     # from contract_output_cache.py by the stage-pickup stored procedure —
     # see sql/04_stage_pickup_task.sql's PACKAGES note).
     "reportlab>=4.0.0",
-    # SMB2/3 client (via its smbclient submodule) for the network drive
-    # ingestion tab — LEX's contracts library is a genuine on-prem file
-    # share, not SharePoint, so this replaces what would otherwise be a
-    # `requests`-based Graph API client. Needs its compiled `cryptography`
-    # dependency to resolve via this account's PyPI access integration;
-    # UNVERIFIED against a live account (see
-    # utils/network_drive_client.py's docstring).
-    "smbprotocol>=1.15.0",
 ]
