@@ -59,6 +59,20 @@ CREATE TABLE IF NOT EXISTS PROJECTS (
     QUERY_WAREHOUSE                VARCHAR(100) NOT NULL DEFAULT 'MTMWH02',
     COMPUTE_POOL                    VARCHAR(100),                   -- NULL = warehouse runtime; set = container runtime
 
+    -- NETWORK_DRIVE_*: NOT read by any code in this repo (the in-app
+    -- direct-SMB ingestion path was removed entirely — see README's "Open
+    -- items"). Kept here as shared config storage ONLY because the
+    -- companion lex_network_bridge repo's network_drive_to_stage.py
+    -- queries this exact table/row directly (a plain SELECT, no
+    -- Snowpark session) to get the real host/share/domain it connects to
+    -- over SMB from inside the MTM network. Do not drop these columns —
+    -- doing so once already deleted this project's working bridge
+    -- configuration and broke that tool with no warning until its next run.
+    NETWORK_DRIVE_HOST         VARCHAR(255),
+    NETWORK_DRIVE_SHARE        VARCHAR(255),
+    NETWORK_DRIVE_DEFAULT_PATH VARCHAR(1000),
+    NETWORK_DRIVE_DOMAIN       VARCHAR(100),
+
     -- Per-project model / tuning knobs (were hardcoded in config.py)
     ACTIVE_MODEL               VARCHAR(50)  DEFAULT 'claude-haiku-4-5',
     MAX_DOCUMENT_CHARS          INT          DEFAULT 150000,   -- also doubles as the per-chunk size for

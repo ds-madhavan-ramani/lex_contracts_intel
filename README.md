@@ -212,26 +212,30 @@ Snowflake Notebooks. In order, it:
    current role can't (see Prerequisites above).
 4. **Creates the LEX project** — `MEDSCOMA.DATA_LEX` schema/stage, registered
    in the catalog with its segmentation profile and retrieval settings.
-5. **Creates LEX's contract tables** — `CONTRACT_REGISTER`,
+5. **Sets the network drive location** (`NETWORK_DRIVE_HOST`/`SHARE`/
+   `DEFAULT_PATH`/`DOMAIN` on the `PROJECTS` row) — not read by this repo's
+   own code; it's shared config storage the companion `lex_network_bridge`
+   repo queries directly for its real SMB connection. Skip if already set.
+6. **Creates LEX's contract tables** — `CONTRACT_REGISTER`,
    `CONTRACT_DOCUMENT_LINK`, `CONTRACT_FIELD_EXTRACTS`.
-6. **Deploys the app** — stages `python/` (structure preserved),
+7. **Deploys the app** — stages `python/` (structure preserved),
    `streamlit/` (flattened to the stage root — see the notebook's own
    comments for why a nested `MAIN_FILE` doesn't work), **and `assets/`**
    (structure preserved, as a sibling of `python/` — this is what
    `docx_report.py` finds the Word template through), then runs
    `CREATE OR REPLACE STREAMLIT`.
-7. **Sets up the stage pickup task** — runs `sql/04_stage_pickup_task.sql`,
+8. **Sets up the stage pickup task** — runs `sql/04_stage_pickup_task.sql`,
    the scheduled Task that drains `NETWORK_DRIVE_INBOX_STAGE` (filled by
    the companion `lex_network_bridge` repo) into the normal ingest
-   pipeline automatically. Must run after step 6 — its stored procedure
+   pipeline automatically. Must run after step 7 — its stored procedure
    imports the `python/` tree that step just staged.
-8. **Creates the `LEX_USERS` role** and grants it once to `ADVANCEDANALYTICS`
+9. **Creates the `LEX_USERS` role** and grants it once to `ADVANCEDANALYTICS`
    — actual user access is managed externally via a security group, not
    per-user grants in this notebook. Note this gives LEX access to
    everyone who holds `ADVANCEDANALYTICS`, not just a named handful. Runs
    after the deploy step since `GRANT USAGE ON STREAMLIT` needs the app
    object to already exist.
-9. **Schema migrations** — forward-only `ALTER TABLE ... ADD COLUMN IF NOT
+10. **Schema migrations** — forward-only `ALTER TABLE ... ADD COLUMN IF NOT
    EXISTS` (plus a one-off `SHAREPOINT_ITEM_ID -> SOURCE_ITEM_ID` rename
    and the `CONTRACT_OUTPUT_STAGE` cache stage)
    for a LEX project that existed before a given column/stage did (a fresh
@@ -386,10 +390,22 @@ from this environment, though:
    connectivity to it (a real IP/FQDN, or a DNS forwarder for the internal
    zone via Private Link), this repo's direct-SMB ingestion path
    (`utils/network_drive_client.py`, `ingestion/network_drive_ingest.py`,
-   the Data Sources page's old "Network Drive" tab, and
-   `PROJECTS.NETWORK_DRIVE_*`) has been removed entirely — `lex_network_bridge`
-   is the permanent way to get files into `NETWORK_DRIVE_INBOX_STAGE`, not
-   a stopgap.
+   and the Data Sources page's old "Network Drive" tab) has been removed
+   entirely — `lex_network_bridge` is the permanent way to get files into
+   `NETWORK_DRIVE_INBOX_STAGE`, not a stopgap. `PROJECTS.NETWORK_DRIVE_HOST`
+   / `NETWORK_DRIVE_SHARE` / `NETWORK_DRIVE_DEFAULT_PATH` / `NETWORK_DRIVE_DOMAIN`
+   are the one exception: **still present, and load-bearing** — nothing in
+   *this* repo reads them, but `lex_network_bridge`'s own
+   `network_drive_to_stage.py` queries this exact `PROJECTS` row directly
+   for its real SMB host/share/domain (confirmed values: host
+   `MTADFS201V.metrotrains.local`, share `apps$`, domain `METROTRAINS`).
+   An earlier pass at this cleanup dropped these columns, silently
+   deleting that working configuration and breaking the bridge tool with
+   no error until its next run — do not drop them again. (`NETWORK_DRIVE_SECRET_NAME`
+   *was* removed for good — it only ever backed the deleted in-app
+   Streamlit SECRET binding; the bridge tool gets its own SMB credentials
+   from local environment variables on the bridge host, never from this
+   table.)
 2. Confirm the security group behind `ADVANCEDANALYTICS` is scoped to the
    right population — `LEX_USERS` is granted to that role directly, so
    whoever it's provisioned to gets LEX access.
