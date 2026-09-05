@@ -29,10 +29,13 @@ production on this account — LEX is a project instance forked from it.
 > target from Snowflake — see Open Items below), so a stopgap bridge tool
 > runs on a Linux host *inside* the MTM network instead, pushing selected
 > contract PDFs out to `MEDSCOMA.DATA_LEX.NETWORK_DRIVE_INBOX_STAGE` via
-> `PUT`. That tool (and its own copy of `utils/network_drive_client.py`)
-> now lives entirely in that separate repo, not here. Picking staged files
-> up from there into this app's normal ingest pipeline (`RAW_DOCUMENTS`,
-> parsing, contract linking) is separate, not-yet-built work.
+> `PUT`, one per-CW subfolder at a time. That tool (and its own copy of
+> `utils/network_drive_client.py`) now lives entirely in that separate
+> repo, not here. From there, a scheduled Task in *this* repo
+> (`python/ingestion/stage_pickup.py`, `sql/04_stage_pickup_task.sql`)
+> automatically picks staged files up into the normal ingest pipeline —
+> `RAW_DOCUMENTS`, contract linking, indexing, and extraction — on a
+> 5-minute schedule, no manual step required. See "Under the hood" below.
 
 ## What it does
 
@@ -294,6 +297,7 @@ robustness, and citation plumbing. What's actually new for LEX:
 | `contract_linking.py` / `contract_extraction.py` + `CONTRACT_REGISTER` / `CONTRACT_DOCUMENT_LINK` / `CONTRACT_FIELD_EXTRACTS` | Contract-family linking and the automated, persisted, cited standard-question extraction ("History"), with its field list matching the team's own template |
 | `CONTRACT_FIELD_EXTRACTS.HIGHLIGHT_PHRASE` + `contract_extraction._extract_highlight_phrase` | A short exact quote, verified as a real substring, for the citation viewer to highlight |
 | `CONTRACT_REGISTER.OVERVIEW_SUMMARY` / `RECOMMENDED_ACTIONS` / `CLASSIFICATION_SCORECARD` | The template's Executive Assessment narrative, Recommended Actions list, and Consolidated Procurement Assessment scorecard — all synthesized from the extracted fields, not independently re-derived |
+| `ingestion/stage_pickup.py` + `sql/04_stage_pickup_task.sql` | A scheduled Snowflake Task that drains `NETWORK_DRIVE_INBOX_STAGE` (filled by the companion `lex_network_bridge` repo) into `RAW_DOCUMENTS` → linking → indexing → extraction, automatically. Auto-linking is safe here specifically because the CW number comes from the bridge's per-CW staging subfolder — a human already confirmed it by searching that folder — not a filename guess, which is what `contract_linking.suggest_cw_number()` deliberately never does unattended elsewhere in this codebase |
 | `citation_viewer.py` / `citation_panel_ui.py` | Presigned stage URLs + a hand-rolled client-side PDF.js viewer that best-effort highlights the cited passage in the original document |
 | `assets/Contract_Workspace_Summary_Template.docx` + `docx_report.py` | The team's actual Word template, filled in place (structure/styles preserved) rather than a bespoke document built from scratch |
 | **Contract Lookup** page (`Chat.py`, repurposed) | The primary end-user surface — enter a contract number, get history, cite, export |
@@ -341,6 +345,16 @@ from this environment, though:
   exact shape under `st.secrets` (username/password fields) is also
   unverified — only `GENERIC_STRING` secrets are confirmed working
   elsewhere in this codebase.
+- `sql/04_stage_pickup_task.sql` is genuinely unverified — no live Task,
+  Stream, or Python stored procedure to test against. Two specific
+  assumptions flagged in that file's own comments: (1) a stored
+  procedure's `IMPORTS` clause given a stage *directory* resolves the
+  same way Streamlit itself resolves `python/` (consistent with every
+  absolute import already in this codebase, but not independently
+  confirmed for the stored-procedure mechanism specifically); (2) `COPY
+  FILES INTO <stage> FROM <stage>` (stage-to-stage, used in
+  `ingestion/stage_pickup.py` to avoid a GET/PUT round trip) behaves as
+  documented. Both have a documented fallback in place if they don't.
 
 ## Open items
 

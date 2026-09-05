@@ -23,8 +23,11 @@ CREATE TABLE IF NOT EXISTS RAW_DOCUMENTS (
     DOC_ID              INT IDENTITY PRIMARY KEY,
     FILE_NAME             VARCHAR(500) NOT NULL,
     STAGE_PATH             VARCHAR(1000) NOT NULL,
-    SOURCE_TYPE             VARCHAR(20) NOT NULL,      -- 'UPLOAD' | 'NETWORK_DRIVE'
-    SOURCE_ITEM_ID           VARCHAR(1000),              -- dedup key (network drive UNC path), NULL for uploads
+    SOURCE_TYPE             VARCHAR(20) NOT NULL,      -- 'UPLOAD' | 'NETWORK_DRIVE' | 'NETWORK_DRIVE_STAGE'
+    SOURCE_ITEM_ID           VARCHAR(1000),              -- dedup key: network drive UNC path, or the
+                                                          -- bridge's inbox-stage relative path
+                                                          -- ("<CW>/<filename>") for NETWORK_DRIVE_STAGE;
+                                                          -- NULL for uploads
     DOCUMENT_DATE               DATE,
     RAW_TEXT                     VARCHAR(16777216),
     SOURCE_HASH                   VARCHAR(64),
