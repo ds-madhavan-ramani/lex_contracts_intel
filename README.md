@@ -364,7 +364,17 @@ from this environment, though:
   `list_staged_files()` queries) until an explicit `ALTER STAGE ...
   REFRESH`. `list_staged_files()` now runs that refresh itself on every
   call — cheap (metadata-only) and removes an entire class of "why didn't
-  my new file show up" confusion. One assumption remains genuinely
+  my new file show up" confusion. A second layer of the same symptom
+  surfaced even after that fix was deployed: the procedure always runs as
+  its owner role (`EXECUTE AS OWNER`, Snowflake's default), and Snowflake's
+  persisted query result cache is keyed by exact query text *and* role —
+  `ALTER STAGE ... REFRESH` is a stage-metadata operation, not a table
+  write, so it isn't guaranteed to invalidate a cached result from an
+  earlier identical query under that same role, even though a different
+  role's session sees the fresh data immediately. `list_staged_files()`
+  now also runs `ALTER SESSION SET USE_CACHED_RESULT = FALSE` before
+  listing, so every call re-reads live state regardless of caching.
+  One assumption remains genuinely
   unverified: `COPY FILES INTO <stage> FROM <stage>` (stage-to-stage, used
   in `ingestion/stage_pickup.py` to avoid a GET/PUT round trip) behaves as
   documented — it has a documented fallback in that module's own docstring

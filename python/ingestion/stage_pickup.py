@@ -112,7 +112,21 @@ def list_staged_files(session) -> List[StagedFile]:
     visible via LIST but absent from DIRECTORY() until an explicit REFRESH.
     Refreshing here on every call is cheap (a metadata-only operation) and
     removes an entire class of "why didn't my new file show up" confusion,
-    at the cost of one extra statement per run."""
+    at the cost of one extra statement per run.
+
+    Also disables the session's query result cache before listing: this
+    procedure always runs as its owner role (EXECUTE AS OWNER is
+    Snowflake's default), so a worksheet session on a different role
+    seeing fresh results is no guarantee this procedure's own role+query
+    combination isn't still being served a persisted result cached from
+    an earlier run — confirmed on a live account as exactly this
+    symptom (REFRESH ran, a manual SELECT under a different role/session
+    showed the new files, but this procedure's own DIRECTORY() query kept
+    returning the pre-refresh empty result). ALTER STAGE ... REFRESH is a
+    stage-metadata operation, not a table write, so it isn't guaranteed to
+    invalidate Snowflake's persisted result cache for a prior identical
+    query the way normal DML does."""
+    session.sql("ALTER SESSION SET USE_CACHED_RESULT = FALSE").collect()
     session.sql(f"ALTER STAGE {INBOX_STAGE} REFRESH").collect()
     rows = session.sql(f"SELECT RELATIVE_PATH FROM DIRECTORY(@{INBOX_STAGE})").collect()
     staged: List[StagedFile] = []
