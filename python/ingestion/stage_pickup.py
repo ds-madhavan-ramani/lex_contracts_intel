@@ -67,6 +67,7 @@ put_stream into project.qualified_stage).
 
 import hashlib
 import json
+import uuid
 from dataclasses import dataclass
 from typing import List, Optional, Set
 
@@ -131,13 +132,31 @@ def list_staged_files(session) -> List[StagedFile]:
     to disable the cache — is itself an unsupported statement type inside
     a Python stored procedure ("Unsupported statement type
     'ALTER_SESSION'"), the same class of restriction as CREATE TEMPORARY
-    TABLE above. Using `statement_params={"use_cached_result": False}` on
-    the one query that matters instead — a per-call Snowpark/connector
-    parameter, not a SQL statement — sidesteps that restriction entirely."""
+    TABLE above.
+
+    CONFIRMED (the hard way) that `statement_params={"use_cached_result":
+    False}` on its own does NOT reliably disable caching here either: with
+    REFRESH run immediately before it, under the confirmed-identical role
+    that owns both the stage and this procedure, it still returned 0 rows
+    while a plain `LIST @stage` (a completely different, always-live code
+    path) confirmed the stage genuinely had files in it. Whatever the
+    exact mechanism, this specific query text has almost certainly been
+    cached from an earlier call to this same function when the inbox
+    really was empty (this function has been invoked, and returned 0
+    rows, many times over the course of getting the rest of this pipeline
+    working), and neither REFRESH nor statement_params reliably busts a
+    persisted result cache for a stage's directory table.
+
+    The fix that actually can't fail regardless of the exact caching
+    mechanism: make the query text itself unique on every call (a SQL
+    comment with a fresh UUID) so there is never a pre-existing cached
+    result to serve, by construction — not relying on any cache-control
+    knob actually being honored in this execution context."""
     session.sql(f"ALTER STAGE {INBOX_STAGE} REFRESH").collect()
-    rows = session.sql(f"SELECT RELATIVE_PATH FROM DIRECTORY(@{INBOX_STAGE})").collect(
-        statement_params={"use_cached_result": False}
-    )
+    cache_buster = uuid.uuid4().hex
+    rows = session.sql(
+        f"SELECT RELATIVE_PATH FROM DIRECTORY(@{INBOX_STAGE}) /* cache_buster={cache_buster} */"
+    ).collect(statement_params={"use_cached_result": False})
     staged: List[StagedFile] = []
     for row in rows:
         relative_path = row["RELATIVE_PATH"]
