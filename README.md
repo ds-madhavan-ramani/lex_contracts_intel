@@ -404,7 +404,24 @@ from this environment, though:
   this pattern is still skipped with a warning rather than guessed at.
   The cache-busting UUID comment stays in place; it's cheap and defends
   against the theoretical caching failure mode even though it turned out
-  not to be the actual bug this time. One assumption remains genuinely
+  not to be the actual bug this time. That root-file normalization fix
+  immediately exposed a second, previously-latent bug on the very first
+  live run: its `REMOVE @{stage}/{filename}` call built the stage
+  location by directly interpolating the raw filename into the SQL text.
+  Real contract filenames (`CW20841 - Executed Services Agreement...
+  (TRAINS).pdf`) have spaces, hyphens, and parens, and Snowflake parses
+  an unquoted `@stage/path` token-by-token — confirmed on a live account
+  as a SQL compilation error at the first space-hyphen-space. Fixed by
+  wrapping the whole `@stage/path` in single quotes (Snowflake's own
+  documented form for this, e.g. `REMOVE '@%mytable/myfile.csv.gz'`),
+  doubling any embedded single quote per standard SQL string-literal
+  escaping (see `_quoted_stage_location` in `ingestion/stage_pickup.py`
+  — unrelated to the backslash-doubling gotcha documented elsewhere in
+  this file for `NETWORK_DRIVE_DEFAULT_PATH`, which is a different
+  escape rule for a different character). The identical unquoted pattern
+  existed in `_remove_from_inbox()`'s per-file cleanup too — fixed there
+  as well, even though it hadn't been exercised yet at the time, since it
+  would have failed the same way. One assumption remains genuinely
   unverified: `COPY FILES INTO <stage> FROM <stage>` (stage-to-stage, used
   in `ingestion/stage_pickup.py` to avoid a GET/PUT round trip) behaves as
   documented — it has a documented fallback in that module's own docstring

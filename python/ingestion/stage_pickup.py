@@ -92,6 +92,24 @@ INBOX_STAGE = "MEDSCOMA.DATA_LEX.NETWORK_DRIVE_INBOX_STAGE"
 _ROOT_FILE_CW_PREFIX = re.compile(r"^(CW\d+)\s*-")
 
 
+def _quoted_stage_location(location: str) -> str:
+    """Single-quotes a stage location (`@stage/path`) for REMOVE and other
+    file-utility commands that take the location as a bare token, not a
+    bind-able value. CONFIRMED on a live account: an unquoted location
+    with a real contract filename ("CW20841 - Executed Services
+    Agreement...pdf") fails with a SQL compilation error at the first
+    space-hyphen-space — Snowflake parses an unquoted @stage/path
+    token-by-token, so spaces/hyphens/parens (all common in scanned
+    contract filenames) break it. Wrapping the whole thing in single
+    quotes (Snowflake's own documented form, e.g. REMOVE
+    '@%mytable/myfile.csv.gz') is the fix; an embedded single quote is
+    escaped by doubling it, the standard SQL string-literal escape (NOT
+    the backslash-doubling this codebase already had to learn about
+    elsewhere for NETWORK_DRIVE_DEFAULT_PATH — unrelated escaping rules
+    for an unrelated character)."""
+    return "'" + location.replace("'", "''") + "'"
+
+
 @dataclass
 class StagedFile:
     cw_number: str
@@ -199,7 +217,7 @@ def list_staged_files(session) -> List[StagedFile]:
                 f"COPY FILES INTO @{INBOX_STAGE}/{cw_number}/ FROM @{INBOX_STAGE}/ FILES = (?)",
                 params=[relative_path],
             ).collect()
-            session.sql(f"REMOVE @{INBOX_STAGE}/{relative_path}").collect()
+            session.sql(f"REMOVE {_quoted_stage_location(f'@{INBOX_STAGE}/{relative_path}')}").collect()
             relative_path = new_relative_path
         else:
             cw_number, file_name = relative_path.split("/", 1)
@@ -387,8 +405,12 @@ def _remove_from_inbox(session, item: StagedFile) -> None:
     does nothing to avoid the repeated OCR cost — this is what actually
     stops that. Called for every non-FAILED outcome (INGESTED, UPDATED,
     SKIPPED_DUPLICATE); a FAILED file is deliberately left in place so the
-    next Task tick retries it rather than silently losing it."""
-    session.sql(f"REMOVE @{INBOX_STAGE}/{item.relative_path}").collect()
+    next Task tick retries it rather than silently losing it.
+
+    Uses _quoted_stage_location — see that helper's docstring: an
+    unquoted @stage/path with a real contract filename (spaces, hyphens,
+    parens) fails SQL compilation, confirmed on a live account."""
+    session.sql(f"REMOVE {_quoted_stage_location(f'@{INBOX_STAGE}/{item.relative_path}')}").collect()
 
 
 def _extract_text(parse_result) -> str:
