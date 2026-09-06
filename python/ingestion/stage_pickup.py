@@ -67,6 +67,7 @@ put_stream into project.qualified_stage).
 
 import hashlib
 import json
+import re
 import uuid
 from dataclasses import dataclass
 from typing import List, Optional, Set
@@ -80,6 +81,15 @@ from utils.sql_utils import SQLBuilder
 logger = get_logger(__name__)
 
 INBOX_STAGE = "MEDSCOMA.DATA_LEX.NETWORK_DRIVE_INBOX_STAGE"
+
+# Matches the CW number the bridge tool's CLI fallback naming convention
+# stamps onto the FRONT of a filename (e.g. "CW14465 - Base Agreement.pdf")
+# when a file ends up staged at the inbox root instead of inside a
+# "<CW_NUMBER>/" subfolder. CONFIRMED on a live account: this happens for
+# at least one of the bridge tool's upload paths — its "browser app, human
+# picks the CW folder" path stages correctly, but files have also been
+# observed landing flat at the root with this filename convention.
+_ROOT_FILE_CW_PREFIX = re.compile(r"^(CW\d+)\s*-")
 
 
 @dataclass
@@ -151,7 +161,20 @@ def list_staged_files(session) -> List[StagedFile]:
     mechanism: make the query text itself unique on every call (a SQL
     comment with a fresh UUID) so there is never a pre-existing cached
     result to serve, by construction — not relying on any cache-control
-    knob actually being honored in this execution context."""
+    knob actually being honored in this execution context.
+
+    CONFIRMED on a live account: after ruling out caching entirely (the
+    cache-buster above proved it wasn't that), the actual "0 files found"
+    root cause was that files were landing at the stage ROOT with no CW
+    subfolder at all — i.e. this function's own root-file skip below was
+    doing exactly what it's supposed to. Rather than let that silently
+    swallow every file from whichever bridge-tool upload path produces
+    this shape, a root-level file whose name starts with "CW<digits> -"
+    (the bridge tool's own filename convention — see _ROOT_FILE_CW_PREFIX)
+    is treated as reliably CW-attributed as a folder name would be, and is
+    moved into the matching subfolder before being picked up. A root file
+    that doesn't match this pattern is still skipped with a warning rather
+    than guessed at."""
     session.sql(f"ALTER STAGE {INBOX_STAGE} REFRESH").collect()
     cache_buster = uuid.uuid4().hex
     rows = session.sql(
@@ -161,15 +184,31 @@ def list_staged_files(session) -> List[StagedFile]:
     for row in rows:
         relative_path = row["RELATIVE_PATH"]
         if "/" not in relative_path:
-            logger.warning("EVENT=STAGE_PICKUP_NO_CW_FOLDER path=%s", relative_path)
-            continue
-        cw_number, file_name = relative_path.split("/", 1)
-        if "/" in file_name:
-            # Nested more than one level deep — not the expected
-            # <CW>/<filename> shape. Skip rather than guess which segment
-            # is the real CW folder.
-            logger.warning("EVENT=STAGE_PICKUP_UNEXPECTED_NESTING path=%s", relative_path)
-            continue
+            match = _ROOT_FILE_CW_PREFIX.match(relative_path)
+            if not match:
+                logger.warning("EVENT=STAGE_PICKUP_NO_CW_FOLDER path=%s", relative_path)
+                continue
+            cw_number = match.group(1)
+            file_name = relative_path
+            new_relative_path = f"{cw_number}/{file_name}"
+            logger.warning(
+                "EVENT=STAGE_PICKUP_ROOT_FILE_NORMALIZED path=%s cw=%s",
+                relative_path, cw_number,
+            )
+            session.sql(
+                f"COPY FILES INTO @{INBOX_STAGE}/{cw_number}/ FROM @{INBOX_STAGE}/ FILES = (?)",
+                params=[relative_path],
+            ).collect()
+            session.sql(f"REMOVE @{INBOX_STAGE}/{relative_path}").collect()
+            relative_path = new_relative_path
+        else:
+            cw_number, file_name = relative_path.split("/", 1)
+            if "/" in file_name:
+                # Nested more than one level deep — not the expected
+                # <CW>/<filename> shape. Skip rather than guess which
+                # segment is the real CW folder.
+                logger.warning("EVENT=STAGE_PICKUP_UNEXPECTED_NESTING path=%s", relative_path)
+                continue
         staged.append(StagedFile(cw_number=cw_number, relative_path=relative_path, file_name=file_name))
     return staged
 
