@@ -32,21 +32,35 @@ Called from a scheduled Snowflake Task (see sql/04_stage_pickup_task.sql)
 via run_stage_pickup(), but every function here also runs standalone from
 a notebook cell or worksheet for manual/ad hoc use.
 
-The inbox drains itself: a file is REMOVEd from NETWORK_DRIVE_INBOX_STAGE
-once it's fully handled (INGESTED, UPDATED, or SKIPPED_DUPLICATE) — see
-_remove_from_inbox. Without this, list_staged_files() would keep re-
-listing every file ever staged on every Task tick forever (its directory-
-table query has no "already handled" filter), which would re-run COPY
-FILES + AI_PARSE_DOCUMENT — the actual OCR/parsing cost — on already-
-processed files every schedule tick indefinitely. The SOURCE_HASH check
-against RAW_DOCUMENTS still prevents a duplicate row or a wasted
-extraction re-run even without this, but does nothing to avoid repeating
-the parse itself, which is what removal actually stops. A FAILED file
-(parse error, text too short) is deliberately left in the inbox so the
-next tick retries it rather than losing it silently — a file stuck
-FAILED needs a human to look at it, not indefinite silent retries either,
-so check PROJECT_SYNC_LOG / a run's returned summary for a persistently
-failing file.
+A processed file is never re-parsed: once a file is fully handled
+(INGESTED, UPDATED, or SKIPPED_DUPLICATE) its path is recorded in
+_STAGE_PICKUP_PROCESSED (see _mark_processed), and list_staged_files()
+excludes anything already in that table from what it returns. Without
+this, list_staged_files() would keep re-listing every file ever staged on
+every Task tick forever (its directory-table query has no "already
+handled" filter on its own), which would re-run COPY FILES +
+AI_PARSE_DOCUMENT — the actual OCR/parsing cost — on already-processed
+files every schedule tick indefinitely. The SOURCE_HASH check against
+RAW_DOCUMENTS still prevents a duplicate row or a wasted extraction
+re-run even without this, but does nothing to avoid repeating the parse
+itself, which is what this tracking actually stops.
+
+CONFIRMED on a live account: this is a table, not an actual deletion from
+NETWORK_DRIVE_INBOX_STAGE, because REMOVE is an unsupported statement
+type inside a Python stored procedure ("Unsupported statement type
+'REMOVE_FILES'") — the same class of restriction as CREATE TEMPORARY
+TABLE and ALTER SESSION elsewhere in this module's history. A processed
+file's bytes stay in the inbox stage forever as harmless dead weight
+(tracking prevents it from ever being reprocessed); use
+purge_processed_inbox_files() from a notebook cell or worksheet
+occasionally to actually delete them — REMOVE works fine outside a
+stored procedure's execution context, only inside one it's rejected.
+
+A FAILED file (parse error, text too short) is deliberately never marked
+processed, so the next tick retries it rather than losing it silently —
+a file stuck FAILED needs a human to look at it, not indefinite silent
+retries either, so check PROJECT_SYNC_LOG / a run's returned summary for
+a persistently failing file.
 
 DOC_ROLE heuristic: a file's role (BASE vs. VARIATION/EXTENSION/etc.)
 can't be determined automatically from a bare filename in general, so the
@@ -81,6 +95,10 @@ from utils.sql_utils import SQLBuilder
 logger = get_logger(__name__)
 
 INBOX_STAGE = "MEDSCOMA.DATA_LEX.NETWORK_DRIVE_INBOX_STAGE"
+# Tracks which inbox files have already been fully handled, in place of
+# actually deleting them — see the module docstring's REMOVE_FILES note.
+# Created by sql/04_stage_pickup_task.sql.
+PROCESSED_TABLE = "MEDSCOMA.DATA_LEX._STAGE_PICKUP_PROCESSED"
 
 # Matches the CW number the bridge tool's CLI fallback naming convention
 # stamps onto the FRONT of a filename (e.g. "CW14465 - Base Agreement.pdf")
@@ -115,6 +133,18 @@ class StagedFile:
     cw_number: str
     relative_path: str   # "<CW>/<filename>" — relative to INBOX_STAGE; the SOURCE_ITEM_ID dedup key
     file_name: str
+    # The path exactly as DIRECTORY() returned it, before any root-file
+    # normalization. Equal to relative_path unless this file was moved out
+    # of the inbox root — see list_staged_files. This, not relative_path,
+    # is what gets recorded in PROCESSED_TABLE, since the original root
+    # copy is what's still physically sitting in the stage (REMOVE can't
+    # delete it — see module docstring) and must be excluded from future
+    # DIRECTORY() scans by the same key it was found under.
+    source_relative_path: str = ""
+
+    def __post_init__(self):
+        if not self.source_relative_path:
+            self.source_relative_path = self.relative_path
 
 
 @dataclass
@@ -196,11 +226,14 @@ def list_staged_files(session) -> List[StagedFile]:
     session.sql(f"ALTER STAGE {INBOX_STAGE} REFRESH").collect()
     cache_buster = uuid.uuid4().hex
     rows = session.sql(
-        f"SELECT RELATIVE_PATH FROM DIRECTORY(@{INBOX_STAGE}) /* cache_buster={cache_buster} */"
+        f"SELECT d.RELATIVE_PATH FROM DIRECTORY(@{INBOX_STAGE}) d "
+        f"LEFT JOIN {PROCESSED_TABLE} p ON d.RELATIVE_PATH = p.RELATIVE_PATH "
+        f"WHERE p.RELATIVE_PATH IS NULL /* cache_buster={cache_buster} */"
     ).collect(statement_params={"use_cached_result": False})
     staged: List[StagedFile] = []
     for row in rows:
-        relative_path = row["RELATIVE_PATH"]
+        source_relative_path = row["RELATIVE_PATH"]
+        relative_path = source_relative_path
         if "/" not in relative_path:
             match = _ROOT_FILE_CW_PREFIX.match(relative_path)
             if not match:
@@ -208,17 +241,24 @@ def list_staged_files(session) -> List[StagedFile]:
                 continue
             cw_number = match.group(1)
             file_name = relative_path
-            new_relative_path = f"{cw_number}/{file_name}"
             logger.warning(
                 "EVENT=STAGE_PICKUP_ROOT_FILE_NORMALIZED path=%s cw=%s",
                 relative_path, cw_number,
             )
+            # Copies the file into its CW subfolder so the rest of the
+            # pipeline can treat it exactly like a correctly-staged file —
+            # COPY FILES is confirmed to work inside a stored procedure.
+            # The original root copy is NOT removed (REMOVE doesn't work
+            # here — see module docstring); source_relative_path (the
+            # ORIGINAL root path) is what gets recorded in PROCESSED_TABLE
+            # once this file is fully handled, so the root copy is
+            # excluded from every future scan by the LEFT JOIN above even
+            # though it's still physically sitting there.
             session.sql(
                 f"COPY FILES INTO @{INBOX_STAGE}/{cw_number}/ FROM @{INBOX_STAGE}/ FILES = (?)",
                 params=[relative_path],
             ).collect()
-            session.sql(f"REMOVE {_quoted_stage_location(f'@{INBOX_STAGE}/{relative_path}')}").collect()
-            relative_path = new_relative_path
+            relative_path = f"{cw_number}/{file_name}"
         else:
             cw_number, file_name = relative_path.split("/", 1)
             if "/" in file_name:
@@ -227,7 +267,8 @@ def list_staged_files(session) -> List[StagedFile]:
                 # segment is the real CW folder.
                 logger.warning("EVENT=STAGE_PICKUP_UNEXPECTED_NESTING path=%s", relative_path)
                 continue
-        staged.append(StagedFile(cw_number=cw_number, relative_path=relative_path, file_name=file_name))
+        staged.append(StagedFile(cw_number=cw_number, relative_path=relative_path, file_name=file_name,
+                                  source_relative_path=source_relative_path))
     return staged
 
 
@@ -283,7 +324,7 @@ def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFil
             if existing and existing[0]["SOURCE_HASH"] == source_hash:
                 results.append(PickupResult(item.file_name, item.cw_number, "SKIPPED_DUPLICATE",
                                              doc_id=existing[0]["DOC_ID"]))
-                _remove_from_inbox(session, item)
+                _mark_processed(session, item)
                 continue
 
             session.sql(
@@ -316,16 +357,16 @@ def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFil
             log_event(logger, "STAGE_PICKUP_FILE", project.project_code,
                       file=item.file_name, cw=item.cw_number, status=status, doc_role=doc_role)
 
-            _remove_from_inbox(session, item)
+            _mark_processed(session, item)
 
         except Exception as e:  # noqa: BLE001 — one bad file shouldn't abort the whole run
             logger.exception("EVENT=STAGE_PICKUP_ERROR file=%s cw=%s", item.file_name, item.cw_number)
             results.append(PickupResult(item.file_name, item.cw_number, "FAILED", error=str(e)))
-            # Deliberately NOT removed from the inbox — left in place so a
-            # FAILED file (e.g. a transient parse error) is retried on the
-            # next Task tick rather than silently lost. See this module's
-            # docstring on why a stuck FAILED file needs a human to look
-            # rather than retrying forever unattended.
+            # Deliberately NOT marked processed — left so a FAILED file
+            # (e.g. a transient parse error) is retried on the next Task
+            # tick rather than silently lost. See this module's docstring
+            # on why a stuck FAILED file needs a human to look rather than
+            # retrying forever unattended.
 
     _log_sync_run(session, project, results)
     return results
@@ -393,24 +434,38 @@ def _run_extraction_for_contracts(session, project: ProjectConfig, contract_ids:
     return errors
 
 
-def _remove_from_inbox(session, item: StagedFile) -> None:
-    """Deletes a successfully-processed file from NETWORK_DRIVE_INBOX_STAGE.
-    Without this, list_staged_files() would keep re-listing every file
-    ever staged on every Task tick forever (its directory-table query has
-    no "already handled" filter — it lists whatever is physically sitting
-    in the stage), which would re-run COPY FILES + AI_PARSE_DOCUMENT
-    (the OCR step) on already-processed files every 5 minutes indefinitely.
-    The SOURCE_HASH check further down still prevents a duplicate
-    RAW_DOCUMENTS row or a wasted extraction re-run in that scenario, but
-    does nothing to avoid the repeated OCR cost — this is what actually
-    stops that. Called for every non-FAILED outcome (INGESTED, UPDATED,
-    SKIPPED_DUPLICATE); a FAILED file is deliberately left in place so the
-    next Task tick retries it rather than silently losing it.
+def _mark_processed(session, item: StagedFile) -> None:
+    """Records a successfully-handled file in PROCESSED_TABLE so
+    list_staged_files() never returns it again. This is a table, not an
+    actual REMOVE — see module docstring on why: REMOVE is an unsupported
+    statement type inside a Python stored procedure, confirmed on a live
+    account. MERGE (not INSERT) makes this idempotent in case a run
+    somehow processes the same file twice. Called for every non-FAILED
+    outcome (INGESTED, UPDATED, SKIPPED_DUPLICATE); a FAILED file is
+    deliberately left unmarked so the next Task tick retries it rather
+    than silently losing it."""
+    session.sql(
+        f"MERGE INTO {PROCESSED_TABLE} t USING (SELECT ? AS RELATIVE_PATH) s "
+        f"ON t.RELATIVE_PATH = s.RELATIVE_PATH "
+        f"WHEN NOT MATCHED THEN INSERT (RELATIVE_PATH) VALUES (s.RELATIVE_PATH)",
+        params=[item.source_relative_path],
+    ).collect()
 
-    Uses _quoted_stage_location — see that helper's docstring: an
-    unquoted @stage/path with a real contract filename (spaces, hyphens,
-    parens) fails SQL compilation, confirmed on a live account."""
-    session.sql(f"REMOVE {_quoted_stage_location(f'@{INBOX_STAGE}/{item.relative_path}')}").collect()
+
+def purge_processed_inbox_files(session) -> int:
+    """Actually deletes every already-processed file's original copy from
+    NETWORK_DRIVE_INBOX_STAGE. NOT called by run_stage_pickup() or the
+    scheduled Task — REMOVE is confirmed unsupported inside a Python
+    stored procedure, so this only works called directly from a notebook
+    cell or worksheet. Safe to run any time: it only ever removes a path
+    PROCESSED_TABLE already has a row for, so a pending or FAILED file is
+    never touched. Returns the number of files removed."""
+    rows = session.sql(f"SELECT RELATIVE_PATH FROM {PROCESSED_TABLE}").collect()
+    for row in rows:
+        relative_path = row["RELATIVE_PATH"]
+        location = _quoted_stage_location(f"@{INBOX_STAGE}/{relative_path}")
+        session.sql(f"REMOVE {location}").collect()
+    return len(rows)
 
 
 def _extract_text(parse_result) -> str:
