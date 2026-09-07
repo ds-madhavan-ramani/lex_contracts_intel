@@ -153,8 +153,15 @@ with tab_index:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Index new/unindexed documents"):
+            status_line = st.empty()
+            # Overwrites in place (unlike Sync Status's growing log) —
+            # only the current item, per a small fixed area on this page.
             with st.spinner("Building index…"):
-                result = build_index_for_project(session, project, rebuild=False)
+                result = build_index_for_project(
+                    session, project, rebuild=False,
+                    on_progress=lambda msg: status_line.caption(msg),
+                )
+            status_line.empty()
             st.success(f"Indexed {result.indexed} document(s).")
             if result.failed:
                 st.error(f"{result.failed} document(s) failed to index:")
@@ -162,8 +169,13 @@ with tab_index:
                     st.write(f"- {err}")
     with col2:
         if st.button("Rebuild all", type="secondary"):
+            status_line = st.empty()
             with st.spinner("Rebuilding full index…"):
-                result = build_index_for_project(session, project, rebuild=True)
+                result = build_index_for_project(
+                    session, project, rebuild=True,
+                    on_progress=lambda msg: status_line.caption(msg),
+                )
+            status_line.empty()
             st.success(f"Rebuilt index for {result.indexed} document(s).")
             if result.failed:
                 st.error(f"{result.failed} document(s) failed to index:")

@@ -19,13 +19,25 @@ chunking works.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from config import ProjectConfig
 from utils.cortex_client import complete, complete_json
 from utils.logging_utils import get_logger, log_event
 
 logger = get_logger(__name__)
+
+# Same convention as ingestion/stage_pickup.py's ProgressCallback — a
+# single human-readable string per meaningful step, for a caller running
+# this in-process (e.g. the Data Sources page's Index tab) to show live
+# status instead of one bare spinner for a run that can take minutes
+# across many large documents. None (the default) is a no-op.
+ProgressCallback = Optional[Callable[[str], None]]
+
+
+def _report(on_progress: ProgressCallback, message: str) -> None:
+    if on_progress:
+        on_progress(message)
 
 # Must stay <= DOCUMENT_INDEX.NODE_SUMMARY/NODE_TITLE's actual column
 # widths (see sql/00_setup_catalog.sql) — a defensive backstop, not the
@@ -162,7 +174,8 @@ def _indexing_max_tokens(project: ProjectConfig) -> int:
 
 def build_index_for_project(session, project: ProjectConfig,
                              doc_ids: Optional[List[int]] = None,
-                             rebuild: bool = False) -> IndexResult:
+                             rebuild: bool = False,
+                             on_progress: ProgressCallback = None) -> IndexResult:
     """
     doc_ids=None -> index every document not yet in DOCUMENT_INDEX (or every
     document if rebuild=True).
@@ -171,6 +184,12 @@ def build_index_for_project(session, project: ProjectConfig,
     coming back malformed (e.g. not the requested JSON shape) is recorded
     as a per-document failure, not an exception that aborts every other
     document still queued in the same call.
+
+    on_progress, when given, is called with one line per document (before
+    and after indexing it) — a full contract library rebuild can run for
+    minutes across many 100-500 page documents, and a bare spinner gives
+    no sense of whether it's stuck or just working. See stage_pickup.py's
+    identical convention, which this was copied from.
     """
     schema = project.qualified_schema
     prompt_template = PROMPTS.get(project.segmentation_profile, PROMPTS["GENERIC"])
@@ -204,13 +223,16 @@ def build_index_for_project(session, project: ProjectConfig,
 
     errors: List[str] = []
     indexed = 0
-    for doc in docs:
+    for i, doc in enumerate(docs, start=1):
+        _report(on_progress, f"[{i}/{len(docs)}] {doc['FILE_NAME']} — indexing…")
         try:
             _index_one_document(session, project, doc["DOC_ID"], doc["FILE_NAME"],
                                  doc["RAW_TEXT"], prompt_template, rebuild, embed_enabled)
             indexed += 1
+            _report(on_progress, f"[{i}/{len(docs)}] {doc['FILE_NAME']} — indexed")
         except Exception as e:  # noqa: BLE001
             errors.append(f"{doc['FILE_NAME']}: {e}")
+            _report(on_progress, f"[{i}/{len(docs)}] {doc['FILE_NAME']} — FAILED ({e})")
 
     return IndexResult(indexed=indexed, failed=len(errors), errors=errors)
 
