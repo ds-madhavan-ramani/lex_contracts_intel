@@ -14,11 +14,20 @@ from typing import Any, Iterable, List
 class SQLBuilder:
     @staticmethod
     def build_merge_raw_document(qualified_schema: str) -> str:
-        """MERGE for idempotent document upsert, keyed on SOURCE_HASH."""
+        """MERGE for idempotent document upsert, keyed on SOURCE_HASH.
+
+        DOCUMENT_DATE is wrapped in TRY_TO_DATE(?): CONFIRMED on a live
+        account that binding a bare Python None to a bare `? AS
+        DOCUMENT_DATE` (a DATE column) failed with "Date 'None' is not
+        recognized" -- i.e. the bind somehow surfaced as the literal
+        string 'None' rather than SQL NULL in this execution path.
+        TRY_TO_DATE sidesteps the exact mechanism: NULL stays NULL, a real
+        date string still parses, and 'None' (or anything else
+        unparseable) becomes NULL instead of erroring."""
         return f"""
             MERGE INTO {qualified_schema}.RAW_DOCUMENTS AS tgt
             USING (SELECT ? AS FILE_NAME, ? AS STAGE_PATH, ? AS SOURCE_TYPE,
-                          ? AS SOURCE_ITEM_ID, ? AS DOCUMENT_DATE,
+                          ? AS SOURCE_ITEM_ID, TRY_TO_DATE(?) AS DOCUMENT_DATE,
                           ? AS RAW_TEXT, ? AS SOURCE_HASH, ? AS SOURCE_URL) AS src
             ON tgt.SOURCE_HASH = src.SOURCE_HASH
             WHEN NOT MATCHED THEN INSERT
@@ -43,7 +52,7 @@ class SQLBuilder:
         return f"""
             MERGE INTO {qualified_schema}.RAW_DOCUMENTS AS tgt
             USING (SELECT ? AS FILE_NAME, ? AS STAGE_PATH, ? AS SOURCE_TYPE,
-                          ? AS SOURCE_ITEM_ID, ? AS DOCUMENT_DATE,
+                          ? AS SOURCE_ITEM_ID, TRY_TO_DATE(?) AS DOCUMENT_DATE,
                           ? AS RAW_TEXT, ? AS SOURCE_HASH, ? AS SOURCE_URL) AS src
             ON tgt.SOURCE_ITEM_ID = src.SOURCE_ITEM_ID
             WHEN MATCHED AND tgt.SOURCE_HASH != src.SOURCE_HASH THEN UPDATE SET
