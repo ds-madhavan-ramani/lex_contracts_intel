@@ -102,7 +102,13 @@ def link_document(session, project: ProjectConfig, contract_id: int, doc_id: int
     """Idempotent on (CONTRACT_ID, DOC_ID) — re-linking the same document to
     the same contract just updates its role/date rather than erroring or
     duplicating, since CONTRACT_DOCUMENT_LINK has a UNIQUE constraint on
-    that pair."""
+    that pair.
+
+    EFFECTIVE_DATE is bound via TRY_TO_DATE(?), same fix and same reason
+    as SQLBuilder's RAW_DOCUMENTS merges: a bare `? AS EFFECTIVE_DATE`
+    against this DATE column fails on effective_date=None (the default,
+    and what every caller in this codebase currently passes) with "Date
+    'None' is not recognized" — TRY_TO_DATE(NULL) is just NULL."""
     if doc_role not in DOC_ROLES:
         raise ValueError(f"doc_role must be one of {DOC_ROLES}, got {doc_role!r}")
 
@@ -110,7 +116,7 @@ def link_document(session, project: ProjectConfig, contract_id: int, doc_id: int
     session.sql(
         f"""MERGE INTO {schema}.CONTRACT_DOCUMENT_LINK AS tgt
             USING (SELECT ? AS CONTRACT_ID, ? AS DOC_ID, ? AS DOC_ROLE,
-                          ? AS EFFECTIVE_DATE, ? AS LINKED_BY) AS src
+                          TRY_TO_DATE(?) AS EFFECTIVE_DATE, ? AS LINKED_BY) AS src
             ON tgt.CONTRACT_ID = src.CONTRACT_ID AND tgt.DOC_ID = src.DOC_ID
             WHEN MATCHED THEN UPDATE SET
                 DOC_ROLE = src.DOC_ROLE, EFFECTIVE_DATE = src.EFFECTIVE_DATE,
