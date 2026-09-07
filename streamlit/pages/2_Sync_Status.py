@@ -35,27 +35,50 @@ st.title(f"📊 Sync Status — {project.project_name}")
 # 5 minutes (see sql/04_stage_pickup_task.sql) — this button exists so
 # there's no need to wait for the schedule, or open a SQL worksheet, to
 # force a run right after staging files via the companion
-# lex_network_bridge repo. The result is stashed in session_state and
-# rendered AFTER the rerun below (a message shown just before st.rerun()
-# is torn down before it's ever visible), then popped so it only shows once.
+# lex_network_bridge repo.
+#
+# Calls ingestion.stage_pickup.run_stage_pickup() directly in-process
+# rather than "CALL RUN_LEX_STAGE_PICKUP()" — same pattern
+# ingestion.file_ingest.ingest_uploaded_files() already uses from the
+# Data Sources page — so an on_progress callback can update this page
+# live, file by file, instead of one opaque spinner for the whole run
+# (a real ask: several files/contracts can take a couple of minutes, and
+# a bare spinner gives no sense of whether it's stuck or just working).
+# The scheduled Task still goes through the stored procedure unchanged;
+# both paths call the identical run_stage_pickup() underneath.
+#
+# The final result is stashed in session_state and rendered AFTER the
+# rerun below (a message shown just before st.rerun() is torn down before
+# it's ever visible), then popped so it only shows once. The live log
+# itself does not need this treatment — it's fully rendered and done by
+# the time the script reaches st.rerun().
 if st.session_state.get("stage_pickup_result"):
     st.success(st.session_state.pop("stage_pickup_result"))
 if st.session_state.get("stage_pickup_error"):
     st.error(st.session_state.pop("stage_pickup_error"))
 
 if st.button("🔄 Check for new files now", type="primary"):
-    with st.spinner("Draining NETWORK_DRIVE_INBOX_STAGE…"):
-        try:
-            st.session_state["stage_pickup_result"] = session.sql(
-                "CALL MEDSCOMA.APP_CATALOG.RUN_LEX_STAGE_PICKUP()"
-            ).collect()[0][0]
-        except Exception as e:  # noqa: BLE001 — surface it, don't crash the page
-            st.session_state["stage_pickup_error"] = (
-                f"Couldn't run the stage pickup: {e}\n\n"
-                "Most likely cause: the \"Set up the stage pickup task\" "
-                "notebook cell hasn't been run yet (the stored procedure "
-                "doesn't exist)."
+    from ingestion.stage_pickup import run_stage_pickup
+
+    log_lines = []
+    log_box = st.empty()
+
+    def _on_progress(message: str) -> None:
+        log_lines.append(message)
+        log_box.code("\n".join(log_lines))
+
+    try:
+        with st.spinner("Draining NETWORK_DRIVE_INBOX_STAGE…"):
+            st.session_state["stage_pickup_result"] = run_stage_pickup(
+                session, project.project_code, on_progress=_on_progress
             )
+    except Exception as e:  # noqa: BLE001 — surface it, don't crash the page
+        st.session_state["stage_pickup_error"] = (
+            f"Couldn't run the stage pickup: {e}\n\n"
+            "Most likely cause: the \"Set up the stage pickup task\" "
+            "notebook cell hasn't been run yet (_STAGE_PICKUP_PROCESSED "
+            "or the inbox stage's directory table doesn't exist)."
+        )
     st.rerun()
 
 st.divider()
