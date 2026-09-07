@@ -7,10 +7,15 @@ Difference from that template: search() takes an optional
 restrict_to_doc_ids parameter. When given, Stage 1's document-summary
 routing (and its keyword-fallback) is skipped entirely — the caller has
 already decided which documents matter — and Stage 2 section retrieval
-runs scoped to exactly those documents. This is what lets LEX's stock-field
-extraction (contract_extraction.py) reuse this exact function, scoped to
-one contract's linked documents, instead of needing a second retrieval
-engine: extraction is just chat with the document set pre-selected.
+runs scoped to exactly those documents.
+
+Not currently called from anywhere in the live app — see search()'s own
+docstring. LEX's stock-field extraction (contract_extraction.py) used to
+reuse this function, scoped to one contract's linked documents via
+restrict_to_doc_ids, but moved to reading full documents directly instead
+(see that module's docstring for why). Kept as groundwork for a possible
+future free-form chat feature — Chat.py's own docstring calls this "the
+free-form question-answering engine this was originally built around."
 """
 
 import hashlib
@@ -63,33 +68,6 @@ class AnswerResult:
         return self.cited_docs[0] if self.cited_docs else None
 
 
-def _recency_label(effective_date, sequence_no, doc_role) -> Optional[str]:
-    """Best-effort "how recent is this document within its contract
-    family" tag for the synthesis prompt, in order of trust: a real
-    EFFECTIVE_DATE (a human or future extraction-set date — the only
-    genuinely reliable signal) if set; otherwise SEQUENCE_NO
-    (stage_pickup.py sets this to processing order — a real but weaker
-    signal, since it reflects when a file was staged, not necessarily its
-    true chronological place if files are staged out of order across
-    separate runs — see that module's own docstring); otherwise DOC_ROLE
-    as the coarsest fallback (a VARIATION/EXTENSION/NOVATION/
-    DEED_OF_AMENDMENT is assumed later than the BASE agreement it amends,
-    per the same heuristic contract_linking.py already documents for
-    assigning DOC_ROLE in the first place). Returns None (no tag at all,
-    rather than a misleading one) when none of these are set — most
-    documents today, since nothing currently populates EFFECTIVE_DATE and
-    stage_pickup.py is presently the only SEQUENCE_NO source."""
-    if effective_date:
-        return f"dated {effective_date}"
-    if sequence_no:
-        return f"document #{sequence_no} in this contract's family, by processing order"
-    if doc_role and doc_role != "BASE":
-        return f"a {doc_role.replace('_', ' ').lower()} to the base agreement"
-    if doc_role == "BASE":
-        return "the base agreement"
-    return None
-
-
 def _normalize_answer_text(text: str) -> str:
     """Some models emit literal backslash-n / backslash-t escape sequences
     in plain-text (non-JSON) responses instead of real whitespace — the
@@ -104,31 +82,22 @@ def _normalize_answer_text(text: str) -> str:
 
 
 def search(session, project: ProjectConfig, question: str, use_cache: bool = True,
-           restrict_to_doc_ids: Optional[List[int]] = None,
-           contract_id: Optional[int] = None) -> AnswerResult:
+           restrict_to_doc_ids: Optional[List[int]] = None) -> AnswerResult:
     """
     restrict_to_doc_ids: when given, skips Stage 1's document-summary
-    routing entirely and searches only within these documents' sections —
-    used by contract_extraction.py to scope a stock question to one
-    contract's linked documents (base + variations/extensions/novations).
-    An empty list (a contract with no linked documents yet) short-circuits
-    to a clear answer rather than falling through to project-wide routing.
-    None (the default) is ordinary free-form chat: every document in the
-    project is a routing candidate, exactly as before this parameter existed.
+    routing entirely and searches only within these documents' sections.
+    An empty list short-circuits to a clear answer rather than falling
+    through to project-wide routing. None (the default) is ordinary
+    free-form chat: every document in the project is a routing candidate,
+    exactly as before this parameter existed.
 
-    contract_id: when given alongside restrict_to_doc_ids, each excerpt is
-    tagged with that document's recency within the contract's family
-    (from CONTRACT_DOCUMENT_LINK — EFFECTIVE_DATE if set, else SEQUENCE_NO,
-    else DOC_ROLE) and the synthesis prompt is told to prefer the more
-    recent document when documents disagree. A contract accumulates
-    variations/extensions/novations over its life (see
-    contract_linking.py's module docstring) that can restate or supersede
-    something the base agreement (or an earlier variation) said — expiry
-    dates and contract values are the most common case — and without a
-    recency signal, retrieval/synthesis has no way to know which excerpt
-    should win a genuine conflict. Ordinary chat (contract_id=None, the
-    default) is unaffected. Only meaningful together with
-    restrict_to_doc_ids; ignored otherwise.
+    Not currently called by anything in the live app — see this module's
+    own header docstring and Chat.py's for why (contract_extraction.py's
+    stock-field extraction moved to reading full documents directly
+    instead of this function's narrow per-question retrieval, after that
+    retrieval/reranking pipeline kept missing real answers on dense
+    contracts even when the answer was genuinely present). Kept as
+    groundwork for a possible future free-form chat feature.
     """
     _validate_question(question)
     schema = project.qualified_schema
@@ -278,22 +247,13 @@ Return ONLY JSON: {{"node_ids": [1, 2]}}"""
 
     # Stage 3: pull raw text for selected sections and synthesize
     placeholders = ", ".join(["?"] * len(node_ids))
-    recency_select, recency_join, recency_params = "", "", []
-    if contract_id is not None:
-        recency_select = ", CDL.EFFECTIVE_DATE, CDL.SEQUENCE_NO, CDL.DOC_ROLE"
-        recency_join = (
-            f"LEFT JOIN {schema}.CONTRACT_DOCUMENT_LINK CDL "
-            f"ON CDL.DOC_ID = RD.DOC_ID AND CDL.CONTRACT_ID = ?"
-        )
-        recency_params = [contract_id]
     selected = session.sql(
         f"""SELECT DI.NODE_ID, DI.NODE_TITLE, DI.NODE_TEXT_REF,
-                   RD.DOC_ID, RD.FILE_NAME, RD.RAW_TEXT, RD.SOURCE_URL{recency_select}
+                   RD.DOC_ID, RD.FILE_NAME, RD.RAW_TEXT, RD.SOURCE_URL
             FROM {schema}.DOCUMENT_INDEX DI
             JOIN {schema}.RAW_DOCUMENTS RD ON DI.DOC_ID = RD.DOC_ID
-            {recency_join}
             WHERE DI.NODE_ID IN ({placeholders})""",
-        params=recency_params + node_ids,
+        params=node_ids,
     ).collect()
 
     # Number sources deterministically in code (not left to the model) —
@@ -303,14 +263,9 @@ Return ONLY JSON: {{"node_ids": [1, 2]}}"""
     # aren't.
     doc_urls = {}
     doc_id_by_name = {}
-    recency_by_name = {}
     for s in selected:
         doc_urls.setdefault(s["FILE_NAME"], s["SOURCE_URL"])
         doc_id_by_name.setdefault(s["FILE_NAME"], s["DOC_ID"])
-        if contract_id is not None:
-            recency_by_name.setdefault(s["FILE_NAME"], _recency_label(
-                s["EFFECTIVE_DATE"], s["SEQUENCE_NO"], s["DOC_ROLE"]
-            ))
     file_names_sorted = sorted(doc_urls)
     doc_numbers = {name: i + 1 for i, name in enumerate(file_names_sorted)}
 
@@ -321,30 +276,13 @@ Return ONLY JSON: {{"node_ids": [1, 2]}}"""
         start_off, end_off = (int(x) for x in s["NODE_TEXT_REF"].split(":"))
         excerpt = s["RAW_TEXT"][start_off:end_off][: project.max_section_chars]
         n = doc_numbers[s["FILE_NAME"]]
-        recency_tag = f" ({recency_by_name[s['FILE_NAME']]})" if recency_by_name.get(s["FILE_NAME"]) else ""
-        context_chunks.append(f"[{n}] {s['FILE_NAME']}{recency_tag} — {s['NODE_TITLE']}\n{excerpt}")
+        context_chunks.append(f"[{n}] {s['FILE_NAME']} — {s['NODE_TITLE']}\n{excerpt}")
         # First (lowest node_id) section per document wins for node_id/
         # excerpt — matches doc_numbers/doc_urls' own "first one seen"
         # convention below, and is what contract_extraction.py stores as
         # CONTRACT_FIELD_EXTRACTS.SOURCE_QUOTE for the citation viewer.
         node_id_by_name.setdefault(s["FILE_NAME"], s["NODE_ID"])
         excerpt_by_name.setdefault(s["FILE_NAME"], excerpt)
-
-    # Only added when contract_id is given (i.e. contract_extraction.py's
-    # family-scoped questions) — ordinary chat's excerpts have no
-    # "supersedes" relationship to each other, so this instruction would
-    # just be noise there. See search()'s contract_id docstring.
-    recency_instruction = ""
-    if contract_id is not None and any(recency_by_name.values()):
-        recency_instruction = (
-            "\n\nSome excerpts are tagged with how recent they are within "
-            "this contract's family of documents (a base agreement plus "
-            "any variations/extensions/novations). If excerpts disagree "
-            "about the same fact (e.g. a different expiry date or value), "
-            "the more recent one supersedes the earlier one — rely on it, "
-            "and say which document your answer comes from when there's a "
-            "conflict."
-        )
 
     synthesis_prompt = f"""Answer the question using ONLY the excerpts below.
 Write in a concise, professional tone, as if briefing a contracts manager —
@@ -363,7 +301,7 @@ refusal, and is not the same thing as guessing: guessing means stating
 something not actually in the excerpts, which stays forbidden. Only say
 the excerpts don't address the question when truly nothing relevant is
 present across ALL of them — never as the default response just because
-no single excerpt fully resolves it on its own.{recency_instruction}
+no single excerpt fully resolves it on its own.
 
 QUESTION: {question}
 

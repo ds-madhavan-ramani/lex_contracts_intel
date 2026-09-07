@@ -478,7 +478,9 @@ def _run_extraction_for_contracts(session, project: ProjectConfig, contract_ids:
             # once every stock field is extracted — calling those three
             # again here would just repeat the same Cortex calls a second
             # time for no benefit.
-            contract_extraction.extract_stock_fields_for_contract(session, project, contract_id)
+            contract_extraction.extract_stock_fields_for_contract(
+                session, project, contract_id, on_progress=on_progress
+            )
             # Phase 3: cache this contract's Word/PDF summary now that its
             # fields are current — see contract_output_cache's own
             # docstring for the PACKAGES caveat this adds to the stored

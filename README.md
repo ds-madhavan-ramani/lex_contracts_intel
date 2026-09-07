@@ -478,23 +478,43 @@ from this environment, though:
   instead of one opaque spinner for the whole run. The scheduled Task
   still goes through the stored procedure, unaffected — both paths call
   the identical function underneath, `on_progress` is just `None` there.
-- Multi-document recency (`query_engine.search()`'s `contract_id`
-  parameter, used by `contract_extraction.py`): `EFFECTIVE_DATE` (the most
-  trustworthy signal) is not populated by anything in this codebase today
-  — no UI sets it, and no extraction step derives it from document text
-  either. The next-best signal, `SEQUENCE_NO`, is set by
-  `ingestion/stage_pickup.py` as the order files for a contract were
-  processed *in one pickup run* — a genuine but weaker signal, since it
-  reflects processing order, not necessarily true chronology, if the same
-  contract's files are staged across separate runs out of order. The
-  final fallback, `DOC_ROLE` (`VARIATION`/`EXTENSION`/etc. assumed later
-  than `BASE`), is the coarsest of the three. All of this degrades
-  gracefully — a family with none of these signals set gets no recency
-  tag at all and behaves exactly as before this change — but it means the
-  actual precedence given today is mostly "whichever file this run
-  processed later," not a verified real-world signing date. Setting a
-  real `EFFECTIVE_DATE` (once some caller actually does) immediately
-  takes priority over both fallbacks with no code change needed.
+- **Stock-field extraction reads full documents directly, not narrow
+  retrieval.** CONFIRMED on a live account: the original design (one
+  `query_engine.search()` call per field, scoped to a contract's family
+  via `restrict_to_doc_ids`) kept returning "the excerpts provided do not
+  contain sufficient information" for most fields on real, densely-written
+  contracts — that retrieval/reranking pipeline wasn't reliably surfacing
+  the right section for a given question even when the answer was
+  genuinely in the documents. `extract_stock_fields_for_contract` now
+  runs one "agent" per template section (`FIELD_GROUPS` — Contract detail
+  / Executive Assessment / Commercial, Performance and Renewal
+  Assessment), each a single Cortex call that reads **every** one of the
+  contract's linked documents in full (base + every variation/extension/
+  novation, oldest first) and answers that section's ~5-8 questions at
+  once, explicitly instructed to narrate how a fact evolved across
+  documents rather than just stating the latest value. `query_engine.py`
+  is no longer called by anything in the live app as a result — kept as
+  groundwork for a possible future free-form chat feature, per its own
+  and `Chat.py`'s docstrings.
+
+  Document ordering (oldest → newest, so the model can narrate the
+  evolution correctly) uses the same `EFFECTIVE_DATE` → `SEQUENCE_NO` →
+  filename precedence as `contract_linking.list_family_documents` —
+  `EFFECTIVE_DATE` (the most trustworthy signal) isn't populated by
+  anything in this codebase today, so in practice this falls back to
+  `SEQUENCE_NO`, which `ingestion/stage_pickup.py` sets to the order
+  files for a contract were processed *in one pickup run* — a real but
+  weaker signal (processing order, not necessarily true chronology, if
+  the same contract's files are staged across separate runs out of
+  order). Setting a real `EFFECTIVE_DATE` (once some caller actually
+  does) immediately takes priority with no code change needed.
+
+  A family's combined document text is capped at
+  `_FULL_TEXT_BUDGET_CHARS` (200,000 characters) per agent call — the
+  newest documents are kept whole and the oldest truncated/dropped first
+  if a family's total exceeds it, matching the same recency-wins
+  precedence. UNVERIFIED: this ceiling is a conservative guess, not a
+  confirmed model context-window limit on this account.
 - `citation_viewer.get_presigned_url()` returns `(url, error)` instead of
   just `url` — a `None` url with a swallowed exception gave "Couldn't
   generate a link to the original document" with no way to tell why
@@ -509,15 +529,18 @@ from this environment, though:
   actually open in a new tab.
 - Only ONE citation is ever recorded per extracted field
   (`CONTRACT_FIELD_EXTRACTS.SOURCE_DOC_ID`/`SOURCE_NODE_ID`/`SOURCE_QUOTE`
-  are single columns, not a list) — `extract_stock_fields_for_contract`
-  stores `query_engine.search()`'s *top* citation only, even when its
-  answer text cites several documents inline as `[1]`, `[2]`, etc. The
-  Contract Register's new tabular view (`_render_fields_table`, toggled
-  via **"Show extracted fields as a table"**) reflects this honestly: one
-  "Source" link per row (the top citation), not a link per inline
-  citation number. Tracking every citation, not just the top one, would
-  need a schema change (a `CITED_DOCS` VARIANT column or similar) — not
-  done here.
+  are single columns, not a list) — `_extract_field_group` records
+  whichever single document the model named as most directly supporting
+  the current answer, even when a field's value narrates how it evolved
+  across several documents (e.g. "originally $X [Document 1], increased
+  to $Y [Document 3]"). `SOURCE_NODE_ID` is always `NULL` now too — there's
+  no `DOCUMENT_INDEX` section involved once extraction reads full
+  documents directly instead of retrieved sections. The Contract
+  Register's tabular view (`_render_fields_table`, toggled via **"Show
+  extracted fields as a table"**) reflects this honestly: one "Source"
+  link per row, not a link per document the value text narrates. Tracking
+  every contributing document, not just one, would need a schema change
+  (a `CITED_DOCS` VARIANT column or similar) — not done here.
 - Indexing (`ingestion/index_builder.py`) can fail with `Cortex response
   was not valid JSON: Unterminated string...` — CONFIRMED on a live
   account for 3 dense contract documents under

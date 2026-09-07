@@ -225,8 +225,11 @@ for family in families:
         extract_col, download_col = st.columns([2, 1])
         if extract_col.button("Run/refresh extraction for this contract",
                               key=f"extract_{family.contract_id}", type="primary"):
+            status_line = extract_col.empty()
             with st.spinner("Running the standard questions…"):
-                contract_extraction.extract_stock_fields_for_contract(session, project, family.contract_id)
+                contract_extraction.extract_stock_fields_for_contract(
+                    session, project, family.contract_id, on_progress=lambda msg: status_line.caption(msg)
+                )
                 contract_output_cache.cache_contract_outputs(session, project, family.contract_id)
             st.success("Extraction complete.")
             st.rerun()

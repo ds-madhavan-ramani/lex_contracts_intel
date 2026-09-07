@@ -12,14 +12,20 @@ COMMERCIAL_ASSESSMENT_FIELDS below for how the flat STOCK_FIELDS list maps
 onto the template's three tables.
 
 LEX-specific: not part of the generic project-llm-wiki template this was
-forked from. Rather than a bespoke single-shot "dump the whole contract and
-ask every question at once" prompt, each stock question is answered by
-calling query_engine.search() — the same retrieval/citation/synthesis path
-— scoped to one contract's linked documents via restrict_to_doc_ids. This
-means extraction shares that engine's "say so rather than guessing"
-behaviour exactly, with no second engine to keep in sync, and it naturally
-covers a contract's variations/extensions since those are all linked
-documents in the same family.
+forked from. Each of the three template sections (FIELD_GROUPS) is
+answered by one "agent" — one Cortex call reading every one of the
+contract's linked documents in FULL (base + every variation/extension/
+novation in the family), not narrow per-question retrieval. CONFIRMED on
+a live account: an earlier design here called query_engine.search() once
+per field, scoped to the family via restrict_to_doc_ids — sharing that
+engine's retrieval/reranking pipeline — and it kept returning "the
+excerpts provided do not contain sufficient information" for most fields
+on real, densely-written contracts, because that pipeline wasn't
+reliably surfacing the right section for a given question even when the
+answer was genuinely in the documents. Reading the full family directly
+per section closes that gap entirely for a workload where the total text
+(a handful of PDFs) comfortably fits in one call — see
+extract_stock_fields_for_contract and _extract_field_group.
 
 Extraction only ever runs on demand (first lookup of a contract, or an
 explicit re-run after its documents change) — never on every page view.
@@ -33,7 +39,6 @@ from typing import Dict, List, Optional
 
 from config import ProjectConfig
 import contract_linking
-from query_engine import search
 from utils.cortex_client import complete, complete_json
 from utils.logging_utils import get_logger, log_event
 
@@ -62,8 +67,9 @@ COMMERCIAL_ASSESSMENT_FIELDS = [
     "TERMINATION", "AUTO_RENEWAL_PERPETUAL_TERM", "CHANGE_OF_CONTROL", "CURRENT_STATUS",
 ]
 
-# The question fed to query_engine.search() for each field, exactly as a
-# user's own question would be. Order here is extraction order and display
+# The question put to the relevant group's "agent" call for each field
+# (see FIELD_GROUPS / _extract_field_group), exactly as a user's own
+# question would be. Order here is extraction order and display
 # order within each group above. Adding a field: append here, add its
 # label to FIELD_LABELS, and add its key to whichever *_FIELDS group above
 # matches where it belongs in the template — no other code changes needed.
@@ -179,35 +185,44 @@ CLASSIFICATION_SCORECARD_LABELS = {
     "RENEWAL_POSITION_RATING": "Renewal position",
 }
 
-_NOT_FOUND_MARKERS = (
-    "i couldn't find a document relevant to that question",
-    "no documents have been added to this project yet",
-    "haven't been indexed yet",
-    "no specific section answers that question",
-    "no documents are linked to this contract yet",
-)
-
-
 @dataclass
 class FieldExtractResult:
     field_key: str
     confidence: str  # HIGH | MEDIUM | LOW | NOT_FOUND
 
 
-def _confidence_for(answer_text: str, cited_docs: list) -> str:
-    """A simple, honest heuristic, not a model-judged confidence score:
-    HIGH when the answer is grounded in at least one citation, NOT_FOUND
-    when it matches one of query_engine's own "couldn't find" messages,
-    LOW otherwise (grounded in nothing, but not a recognized "not found"
-    message either — worth a reviewer's eye). Good enough to sort a review
-    queue by; not a substitute for a human actually reading the answer."""
-    lowered = (answer_text or "").strip().lower()
-    if any(marker in lowered for marker in _NOT_FOUND_MARKERS):
-        return "NOT_FOUND"
-    if cited_docs:
-        return "HIGH"
-    return "LOW"
+# One "agent" per group — each reads every one of the contract's linked
+# documents in full and answers just its own group's questions. Three
+# focused calls per contract instead of one call per field (21 narrow,
+# independently-retrieved questions) — see extract_stock_fields_for_contract's
+# own docstring for why the narrow-retrieval design this replaced kept
+# failing on real contracts.
+FIELD_GROUPS = [
+    ("Contract detail", CONTRACT_DETAIL_FIELDS),
+    ("Executive Assessment", EXECUTIVE_ASSESSMENT_FIELDS),
+    ("Commercial, Performance and Renewal Assessment", COMMERCIAL_ASSESSMENT_FIELDS),
+]
 
+_NOT_ADDRESSED_TEXT = "Not addressed in any of the linked documents."
+
+# Total characters of document text one group's extraction call will
+# read, across every linked document combined. Generous — this is a
+# handful of Cortex calls per contract, not a per-question cost — but
+# still needs a ceiling for very large families. When the combined text
+# would exceed it, the OLDEST documents are truncated/dropped first and
+# the NEWEST kept whole, matching this project's established
+# recency-wins precedence (see query_engine.py's contract_id parameter).
+# UNVERIFIED past this value: the underlying model's actual context
+# window on this account — this is a conservative guess, not a confirmed
+# limit; lower it if a live run hits a "prompt too long" style error.
+_FULL_TEXT_BUDGET_CHARS = 200000
+
+# A single group's response holds a detailed paragraph-length value plus
+# a verbatim quote for each of that group's ~5-8 fields — sized like
+# index_builder.py's DETAILED-granularity budget for the same reason
+# (complete_json retries with more room on its own if this isn't enough,
+# up to utils/cortex_client.py's MAX_JSON_RETRY_TOKENS).
+_GROUP_EXTRACTION_MAX_TOKENS = 8000
 
 _HIGHLIGHT_PHRASE_PROMPT = """Below is an excerpt from a contract, and an
 answer that was derived from it. Quote the single sentence or short phrase
@@ -260,19 +275,168 @@ def _extract_highlight_phrase(session, project: ProjectConfig, answer_text: str,
     return phrase[:500]
 
 
-def extract_stock_fields_for_contract(session, project: ProjectConfig, contract_id: int) -> List[FieldExtractResult]:
-    """Runs every stock question for one contract, scoped to its linked
-    documents, and upserts CONTRACT_FIELD_EXTRACTS — this is what
-    populates "the History" the Contract Lookup page reads from. Safe to
-    re-run any time — e.g. after a new variation/extension is linked into
-    the family, or a linked document's content changed (see
-    is_extraction_current) — since each field is a MERGE keyed on
-    (CONTRACT_ID, FIELD_KEY), not an append. A field a reviewer already
-    marked IS_VERIFIED is overwritten like any other on re-run:
-    re-verifying after a contract's documents change is a deliberate
-    design choice, not an oversight — an unreviewed re-extraction should
-    not silently keep an old field flagged as verified once its source
-    documents have changed.
+def _confidence_for_full_text(value: str, quote: str) -> str:
+    """Same honest-heuristic spirit as this module's earlier retrieval-based
+    version: HIGH when grounded in a verified verbatim quote, NOT_FOUND
+    when the model explicitly said the documents don't address it, LOW
+    otherwise (a value with no verifiable quote — worth a reviewer's eye)."""
+    lowered = (value or "").strip().lower()
+    if not lowered or _NOT_ADDRESSED_TEXT.lower() in lowered:
+        return "NOT_FOUND"
+    if quote:
+        return "HIGH"
+    return "LOW"
+
+
+def _get_family_documents_for_extraction(session, project: ProjectConfig, contract_id: int) -> List[dict]:
+    """Every document linked to this contract, oldest first, with its full
+    RAW_TEXT — the input to the full-text extraction below. Same ordering
+    as contract_linking.list_family_documents (EFFECTIVE_DATE, then
+    SEQUENCE_NO, both NULLS LAST) so "oldest first" holds even when no
+    EFFECTIVE_DATE is set (the common case today) — see that function and
+    query_engine._recency_label for why SEQUENCE_NO is the fallback signal."""
+    schema = project.qualified_schema
+    rows = session.sql(
+        f"""SELECT RD.DOC_ID, RD.FILE_NAME, RD.RAW_TEXT, CDL.DOC_ROLE,
+                   CDL.EFFECTIVE_DATE, CDL.SEQUENCE_NO
+            FROM {schema}.CONTRACT_DOCUMENT_LINK CDL
+            JOIN {schema}.RAW_DOCUMENTS RD ON CDL.DOC_ID = RD.DOC_ID
+            WHERE CDL.CONTRACT_ID = ?
+            ORDER BY CDL.EFFECTIVE_DATE NULLS LAST, CDL.SEQUENCE_NO NULLS LAST, RD.FILE_NAME""",
+        params=[contract_id],
+    ).collect()
+    return [dict(r.as_dict()) for r in rows]
+
+
+_FULL_TEXT_EXTRACTION_PROMPT = """You are reviewing a contract and its full
+family of amending documents for a contracts manager. Below are ALL the
+documents linked to this contract, in chronological order (oldest first).
+A later document can amend, extend, replace, or restate something an
+earlier one said — when that happens, describe the evolution explicitly
+(e.g. "originally set at $X [Document 1], increased to $Y under the
+December 2025 Amendment Deed [Document 3]") rather than only stating the
+final value alone. Extract SPECIFIC facts — exact dollar figures, dates,
+clause numbers, defined terms, party names — verbatim as written, not
+paraphrased or rounded.
+
+Answer each of the following questions using ONLY what is actually in the
+documents below. Give the most complete answer the documents actually
+support: state what IS there, citing the document number, then note
+specifically what's missing if anything is genuinely absent. Only answer
+that a question isn't addressed when truly nothing relevant appears
+anywhere in the ENTIRE set below — never merely because one document
+alone doesn't fully resolve it while another does.
+
+QUESTIONS:
+{questions_block}
+
+DOCUMENTS:
+{documents_block}
+
+Return ONLY JSON in this shape, one entry per question key exactly as
+given above:
+{{
+  "FIELD_KEY": {{"value": "...", "source_document": 2, "quote": "verbatim supporting excerpt from that document"}}
+}}
+"value" should be a thorough paragraph reflecting everything relevant
+found across the documents, exactly as you would brief a contracts
+manager — not a one-line fragment. "source_document" is the number of the
+SINGLE document (from the list above) that most directly supports the
+final/current answer (the most recent one that addresses it, if it
+evolved across documents). "quote" must be copied VERBATIM, character for
+character, from that specific document — leave it as an empty string
+rather than paraphrasing something and calling it a quote if you cannot
+find an exact supporting passage. If a question is genuinely not
+addressed anywhere, still include its key with exactly
+{{"value": "{not_addressed}", "source_document": null, "quote": ""}}.
+"""
+
+
+def _extract_field_group(session, project: ProjectConfig, group_label: str, field_keys: list,
+                         ordered_docs: List[dict]) -> Dict[str, dict]:
+    """Runs one "agent" — one Cortex call reading every linked document in
+    full — for one group of related fields. Returns
+    {field_key: {"value", "source_doc_id", "quote"}}."""
+    questions_block = "\n".join(f"- {key}: {_QUESTIONS[key]}" for key in field_keys)
+
+    # Budget: keep the NEWEST documents whole, truncate/drop the OLDEST
+    # ones first if the combined text would be too large for one call.
+    budget = _FULL_TEXT_BUDGET_CHARS
+    text_by_doc_id: Dict[int, str] = {}
+    for doc in reversed(ordered_docs):  # newest first for budget allocation
+        if budget <= 0:
+            break
+        text = (doc["RAW_TEXT"] or "")[:budget]
+        text_by_doc_id[doc["DOC_ID"]] = text
+        budget -= len(text)
+
+    doc_number_by_id: Dict[int, int] = {}
+    documents_block_parts = []
+    for doc in ordered_docs:  # display order stays oldest-first regardless of budget order
+        if doc["DOC_ID"] not in text_by_doc_id:
+            continue
+        n = len(doc_number_by_id) + 1
+        doc_number_by_id[doc["DOC_ID"]] = n
+        role_desc = (doc.get("DOC_ROLE") or "").replace("_", " ").title() or "Document"
+        date_bit = f", effective {doc['EFFECTIVE_DATE']}" if doc.get("EFFECTIVE_DATE") else ""
+        documents_block_parts.append(
+            f"[Document {n}] {doc['FILE_NAME']} ({role_desc}{date_bit})\n{text_by_doc_id[doc['DOC_ID']]}"
+        )
+
+    prompt = _FULL_TEXT_EXTRACTION_PROMPT.format(
+        questions_block=questions_block,
+        documents_block="\n\n".join(documents_block_parts),
+        not_addressed=_NOT_ADDRESSED_TEXT,
+    )
+    result = complete_json(session, project.active_model, prompt, max_tokens=_GROUP_EXTRACTION_MAX_TOKENS)
+
+    doc_id_by_number = {n: doc_id for doc_id, n in doc_number_by_id.items()}
+
+    parsed: Dict[str, dict] = {}
+    for key in field_keys:
+        entry = result.get(key) or {}
+        value = (entry.get("value") or "").strip()
+        source_doc_id = doc_id_by_number.get(entry.get("source_document"))
+        quote = (entry.get("quote") or "").strip()
+        if quote and source_doc_id and _normalize_for_match(quote) not in _normalize_for_match(
+            text_by_doc_id.get(source_doc_id, "")
+        ):
+            quote = ""  # unverified — see _extract_highlight_phrase's identical principle
+        parsed[key] = {"value": value, "source_doc_id": source_doc_id, "quote": quote}
+    return parsed
+
+
+def extract_stock_fields_for_contract(session, project: ProjectConfig, contract_id: int,
+                                      on_progress=None) -> List[FieldExtractResult]:
+    """Runs every stock question for one contract and upserts
+    CONTRACT_FIELD_EXTRACTS — this is what populates "the History" the
+    Contract Lookup page reads from. Safe to re-run any time — e.g. after
+    a new variation/extension is linked into the family, or a linked
+    document's content changed (see is_extraction_current) — since each
+    field is a MERGE keyed on (CONTRACT_ID, FIELD_KEY), not an append. A
+    field a reviewer already marked IS_VERIFIED is overwritten like any
+    other on re-run: re-verifying after a contract's documents change is a
+    deliberate design choice, not an oversight — an unreviewed
+    re-extraction should not silently keep an old field flagged as
+    verified once its source documents have changed.
+
+    CONFIRMED on a live account: the original design here (one
+    query_engine.search() call per field, scoped to the family via
+    restrict_to_doc_ids) kept returning "the excerpts provided do not
+    contain sufficient information..." for most fields on real, densely-
+    written contracts — the retrieval/reranking pipeline that design
+    depends on wasn't reliably surfacing the right section for a given
+    question even when the answer was genuinely in the documents. Rather
+    than tune that pipeline further, this now reads every linked
+    document's FULL text directly, grouped into one Cortex call per
+    template section (FIELD_GROUPS — "agents", each looping over every
+    document in the family) — closing the retrieval gap entirely for a
+    workload where the total text (a handful of PDFs) comfortably fits in
+    one call. See _extract_field_group for the budget/truncation rule
+    when a family's combined text is unusually large.
+
+    on_progress, when given, is called once per group ("agent") — see
+    ingestion/stage_pickup.py's identical convention.
 
     Also (re)generates the contract's Executive Assessment narrative,
     Recommended Actions, and classification scorecard once every field has
@@ -280,53 +444,47 @@ def extract_stock_fields_for_contract(session, project: ProjectConfig, contract_
     generate_recommended_actions, generate_classification_scorecard.
     """
     schema = project.qualified_schema
-    family_doc_ids = contract_linking.get_family_doc_ids(session, project, contract_id)
+    ordered_docs = _get_family_documents_for_extraction(session, project, contract_id)
 
     results: List[FieldExtractResult] = []
-    for field_key, question in STOCK_FIELDS:
-        # contract_id lets search() tag each excerpt with its recency
-        # within this contract's family (EFFECTIVE_DATE/SEQUENCE_NO/
-        # DOC_ROLE) and tell synthesis to prefer the more recent document
-        # when documents disagree — see search()'s own docstring. This
-        # matters here specifically: a contract can have 2-20+ linked
-        # files (base, variations, extensions, renewals), and a later one
-        # can restate something (an expiry date, a value) the base or an
-        # earlier variation already said, superseding it.
-        answer = search(session, project, question, use_cache=True,
-                        restrict_to_doc_ids=family_doc_ids, contract_id=contract_id)
-        confidence = _confidence_for(answer.answer, answer.cited_docs)
-        top = answer.top_citation
-        excerpt = (top or {}).get("excerpt", "")
-        highlight_phrase = (
-            _extract_highlight_phrase(session, project, answer.answer, excerpt)
-            if top else None
-        )
+    for i, (group_label, field_keys) in enumerate(FIELD_GROUPS, start=1):
+        if on_progress:
+            on_progress(f"Agent {i}/{len(FIELD_GROUPS)} ({group_label}): "
+                        f"reading {len(ordered_docs)} document(s)…")
+        parsed = _extract_field_group(session, project, group_label, field_keys, ordered_docs)
 
-        session.sql(
-            f"""MERGE INTO {schema}.CONTRACT_FIELD_EXTRACTS AS tgt
-                USING (SELECT ? AS CONTRACT_ID, ? AS FIELD_KEY, ? AS FIELD_VALUE,
-                              ? AS SOURCE_DOC_ID, ? AS SOURCE_NODE_ID, ? AS SOURCE_QUOTE,
-                              ? AS HIGHLIGHT_PHRASE, ? AS CONFIDENCE, ? AS MODEL_USED) AS src
-                ON tgt.CONTRACT_ID = src.CONTRACT_ID AND tgt.FIELD_KEY = src.FIELD_KEY
-                WHEN MATCHED THEN UPDATE SET
-                    FIELD_VALUE = src.FIELD_VALUE, SOURCE_DOC_ID = src.SOURCE_DOC_ID,
-                    SOURCE_NODE_ID = src.SOURCE_NODE_ID, SOURCE_QUOTE = src.SOURCE_QUOTE,
-                    HIGHLIGHT_PHRASE = src.HIGHLIGHT_PHRASE, CONFIDENCE = src.CONFIDENCE,
-                    MODEL_USED = src.MODEL_USED, EXTRACTED_AT = CURRENT_TIMESTAMP(),
-                    IS_VERIFIED = FALSE, VERIFIED_BY = NULL, VERIFIED_AT = NULL
-                WHEN NOT MATCHED THEN INSERT
-                    (CONTRACT_ID, FIELD_KEY, FIELD_VALUE, SOURCE_DOC_ID, SOURCE_NODE_ID,
-                     SOURCE_QUOTE, HIGHLIGHT_PHRASE, CONFIDENCE, MODEL_USED)
-                    VALUES (src.CONTRACT_ID, src.FIELD_KEY, src.FIELD_VALUE, src.SOURCE_DOC_ID,
-                            src.SOURCE_NODE_ID, src.SOURCE_QUOTE, src.HIGHLIGHT_PHRASE,
-                            src.CONFIDENCE, src.MODEL_USED)""",
-            params=[contract_id, field_key, answer.answer[:4000],
-                    top["doc_id"] if top else None, top["node_id"] if top else None,
-                    excerpt[:4000] if excerpt else None, highlight_phrase,
-                    confidence, project.active_model],
-        ).collect()
+        for field_key in field_keys:
+            entry = parsed[field_key]
+            value, source_doc_id, quote = entry["value"], entry["source_doc_id"], entry["quote"]
+            confidence = _confidence_for_full_text(value, quote)
+            highlight_phrase = _extract_highlight_phrase(session, project, value, quote) if quote else None
 
-        results.append(FieldExtractResult(field_key, confidence))
+            session.sql(
+                f"""MERGE INTO {schema}.CONTRACT_FIELD_EXTRACTS AS tgt
+                    USING (SELECT ? AS CONTRACT_ID, ? AS FIELD_KEY, ? AS FIELD_VALUE,
+                                  ? AS SOURCE_DOC_ID, ? AS SOURCE_NODE_ID, ? AS SOURCE_QUOTE,
+                                  ? AS HIGHLIGHT_PHRASE, ? AS CONFIDENCE, ? AS MODEL_USED) AS src
+                    ON tgt.CONTRACT_ID = src.CONTRACT_ID AND tgt.FIELD_KEY = src.FIELD_KEY
+                    WHEN MATCHED THEN UPDATE SET
+                        FIELD_VALUE = src.FIELD_VALUE, SOURCE_DOC_ID = src.SOURCE_DOC_ID,
+                        SOURCE_NODE_ID = src.SOURCE_NODE_ID, SOURCE_QUOTE = src.SOURCE_QUOTE,
+                        HIGHLIGHT_PHRASE = src.HIGHLIGHT_PHRASE, CONFIDENCE = src.CONFIDENCE,
+                        MODEL_USED = src.MODEL_USED, EXTRACTED_AT = CURRENT_TIMESTAMP(),
+                        IS_VERIFIED = FALSE, VERIFIED_BY = NULL, VERIFIED_AT = NULL
+                    WHEN NOT MATCHED THEN INSERT
+                        (CONTRACT_ID, FIELD_KEY, FIELD_VALUE, SOURCE_DOC_ID, SOURCE_NODE_ID,
+                         SOURCE_QUOTE, HIGHLIGHT_PHRASE, CONFIDENCE, MODEL_USED)
+                        VALUES (src.CONTRACT_ID, src.FIELD_KEY, src.FIELD_VALUE, src.SOURCE_DOC_ID,
+                                src.SOURCE_NODE_ID, src.SOURCE_QUOTE, src.HIGHLIGHT_PHRASE,
+                                src.CONFIDENCE, src.MODEL_USED)""",
+                params=[contract_id, field_key, value[:4000],
+                        source_doc_id, None, quote[:4000] if quote else None,
+                        highlight_phrase, confidence, project.active_model],
+            ).collect()
+
+            results.append(FieldExtractResult(field_key, confidence))
+        if on_progress:
+            on_progress(f"Agent {i}/{len(FIELD_GROUPS)} ({group_label}): done")
 
     log_event(logger, "CONTRACT_EXTRACTED", project.project_code,
               contract_id=contract_id,
@@ -537,11 +695,12 @@ def build_fields_table(session, project: ProjectConfig, contract_id: int) -> Lis
     calling page can build a citation link (citation_viewer.py) or render
     a checkbox without a second query. Only ONE source is ever recorded
     per field today (CONTRACT_FIELD_EXTRACTS.SOURCE_DOC_ID is a single
-    column, not a list — see extract_stock_fields_for_contract, which
-    stores query_engine.search()'s *top* citation only, even though its
-    answer text may cite several documents inline as [1], [2], ...) — so
-    a row's single "Source" link is the top citation, not a link per
-    inline citation number the answer text might mention."""
+    column, not a list — see extract_stock_fields_for_contract's
+    _extract_field_group, which picks the single document the model
+    named as most directly supporting the answer, even though a field's
+    value may describe how the answer evolved across several documents)
+    — so a row's single "Source" link points at that one document, not a
+    link per document the value text narrates."""
     fields = get_contract_fields(session, project, contract_id)
     return [
         {
