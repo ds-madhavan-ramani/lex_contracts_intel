@@ -23,6 +23,7 @@ import contract_linking
 import contract_extraction
 import contract_output_cache
 import required_contracts
+import citation_viewer
 from citation_panel_ui import render_citation_panel
 
 st.set_page_config(page_title="Contract Register — LEX", page_icon="📋", layout="wide")
@@ -43,6 +44,71 @@ CONFIDENCE_BADGE = {
     "NOT_FOUND": "🔴 Not found in the documents",
     None: "⚪ Not yet extracted",
 }
+
+
+def _render_fields_table(session, project, contract_id: int) -> None:
+    """Alternative to the per-field boxed layout: every stock field as one
+    row (Section, Field, Value, Confidence, Source passage, Source link,
+    Verified). Only ONE source is recorded per field today (see
+    contract_extraction.build_fields_table's own docstring) — "Source" is
+    that one link, not a link per inline [n] citation number the answer
+    text may mention."""
+    import pandas as pd
+
+    rows = contract_extraction.build_fields_table(session, project, contract_id)
+
+    # Presigned URLs are a live SQL call each — cache by stage path since
+    # many fields in the same contract share the same source document.
+    url_cache: dict = {}
+
+    def _url_for(stage_path):
+        if not stage_path:
+            return None
+        if stage_path not in url_cache:
+            url_cache[stage_path] = citation_viewer.get_citation_url_for_field(
+                session, project, {"SOURCE_STAGE_PATH": stage_path}
+            )
+        return url_cache[stage_path]
+
+    table_rows = [
+        {
+            "Section": r["section"],
+            "Field": r["label"],
+            "Value": r["value"] or "",
+            "Confidence": CONFIDENCE_BADGE.get(r["confidence"], r["confidence"] or ""),
+            "Source passage": r["source_quote"] or "",
+            "Source": _url_for(r["source_stage_path"]) or "",
+            "Verified": r["is_verified"],
+            "_field_key": r["field_key"],
+        }
+        for r in rows
+    ]
+    df = pd.DataFrame(table_rows)
+
+    edited = st.data_editor(
+        df,
+        column_order=["Section", "Field", "Value", "Confidence", "Source passage", "Source", "Verified"],
+        column_config={
+            "Value": st.column_config.TextColumn("Value", width="large"),
+            "Source passage": st.column_config.TextColumn("Source passage", width="large"),
+            "Source": st.column_config.LinkColumn("Source", display_text="View source ↗"),
+            "Verified": st.column_config.CheckboxColumn("Verified"),
+        },
+        disabled=["Section", "Field", "Value", "Confidence", "Source passage", "Source"],
+        hide_index=True,
+        use_container_width=True,
+        key=f"fields_table_{contract_id}",
+    )
+
+    changed = edited[edited["Verified"] != df["Verified"]]
+    if not changed.empty:
+        current_user = session.sql("SELECT CURRENT_USER() AS U").collect()[0]["U"]
+        for _, row in changed.iterrows():
+            contract_extraction.set_field_verified(
+                session, project, contract_id, row["_field_key"],
+                bool(row["Verified"]), verified_by=current_user,
+            )
+        st.rerun()
 
 st.title(f"📋 Contract Register — {project.project_name}")
 st.caption(
@@ -132,9 +198,18 @@ if top_col2.button("Run extraction for all contracts", type="primary", disabled=
 if not families:
     st.info("No contracts yet — link a document above to create one.")
 
+# Filter to one contract instead of scrolling/expanding through all of
+# them — "All contracts" (the default) keeps today's behavior unchanged.
+ALL_CONTRACTS_OPTION = "All contracts"
+cw_filter_options = [ALL_CONTRACTS_OPTION] + [f.cw_number for f in families]
+selected_cw = st.selectbox("Filter to one contract", cw_filter_options, key="contract_register_cw_filter")
+if selected_cw != ALL_CONTRACTS_OPTION:
+    families = [f for f in families if f.cw_number == selected_cw]
+
 for family in families:
     with st.expander(f"**{family.cw_number}** — {family.contract_title or '(title not yet set)'} "
-                      f"· {family.document_count} document(s) · {family.status}"):
+                      f"· {family.document_count} document(s) · {family.status}",
+                      expanded=(len(families) == 1)):
         docs = contract_linking.list_family_documents(session, project, family.contract_id)
         st.markdown("**Linked documents**")
         for d in docs:
@@ -211,13 +286,23 @@ for family in families:
                         )
                         st.rerun()
 
-        st.markdown("**Contract detail**")
-        for key in contract_extraction.CONTRACT_DETAIL_FIELDS:
-            _render_field(key)
+        show_table = st.toggle(
+            "Show extracted fields as a table", key=f"table_toggle_{family.contract_id}"
+        )
+        if show_table:
+            _render_fields_table(session, project, family.contract_id)
+        else:
+            st.markdown("**Contract detail**")
+            for key in contract_extraction.CONTRACT_DETAIL_FIELDS:
+                _render_field(key)
 
-        st.markdown("**Executive Assessment — findings**")
-        for key in contract_extraction.EXECUTIVE_ASSESSMENT_FIELDS:
-            _render_field(key)
+            st.markdown("**Executive Assessment — findings**")
+            for key in contract_extraction.EXECUTIVE_ASSESSMENT_FIELDS:
+                _render_field(key)
+
+            st.markdown("**Commercial, Performance and Renewal Assessment**")
+            for key in contract_extraction.COMMERCIAL_ASSESSMENT_FIELDS:
+                _render_field(key)
 
         st.markdown("**Significant Variations**")
         variations = contract_linking.get_significant_variations(session, project, family.contract_id)
@@ -228,10 +313,6 @@ for family in families:
                 st.markdown(f"- **{v['FILE_NAME']}** ({role}{date_bit}): {v.get('NODE_SUMMARY') or '_not yet indexed_'}")
         else:
             st.caption("No variations, extensions, or novations are currently linked to this contract.")
-
-        st.markdown("**Commercial, Performance and Renewal Assessment**")
-        for key in contract_extraction.COMMERCIAL_ASSESSMENT_FIELDS:
-            _render_field(key)
 
         st.markdown("**Consolidated Procurement Assessment**")
         scorecard = (contract_row or {}).get("CLASSIFICATION_SCORECARD") or {}

@@ -48,7 +48,15 @@ def render_citation_panel(session, project, field: dict) -> None:
         return
 
     st.divider()
-    url = citation_viewer.get_presigned_url(session, project, stage_path)
+    url, error = citation_viewer.get_presigned_url(session, project, stage_path)
+    if url:
+        # A real Streamlit link_button (opens in a new tab) alongside the
+        # embedded viewer, not just the "Open in new tab" anchor inside
+        # the iframe's own toolbar — that one is dead if the CDN script
+        # never loads (this file's own module docstring flags that as
+        # unverified from here), so this is the one link on this panel
+        # that's guaranteed to work regardless.
+        st.link_button("Open original document ↗", url)
     if citation_viewer.is_pdf(file_name):
         st.caption("Original document — best-effort highlight, see citation_viewer.py for caveats")
         if url:
@@ -56,12 +64,11 @@ def render_citation_panel(session, project, field: dict) -> None:
                 citation_viewer.build_pdf_viewer_html(url, phrase), height=640, scrolling=False
             )
         else:
-            st.warning("Couldn't generate a link to the original document.")
+            st.warning(f"Couldn't generate a link to the original document: {error}")
     else:
         st.caption("Inline preview is PDF-only for now — open the original instead.")
         if url:
-            st.link_button("Open original document ↗", url)
             if phrase:
                 st.caption(f"Search for: “{phrase}”")
         else:
-            st.warning("Couldn't generate a link to the original document.")
+            st.warning(f"Couldn't generate a link to the original document: {error}")

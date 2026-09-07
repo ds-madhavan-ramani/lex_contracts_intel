@@ -495,6 +495,29 @@ from this environment, though:
   processed later," not a verified real-world signing date. Setting a
   real `EFFECTIVE_DATE` (once some caller actually does) immediately
   takes priority over both fallbacks with no code change needed.
+- `citation_viewer.get_presigned_url()` returns `(url, error)` instead of
+  just `url` — a `None` url with a swallowed exception gave "Couldn't
+  generate a link to the original document" with no way to tell why
+  (missing stage privileges on the viewing role vs. a genuinely missing
+  file vs. something else); the real error now surfaces in
+  `citation_panel_ui.py`'s warning text. That panel also now always shows
+  a real `st.link_button` ("Open original document ↗") when a URL exists,
+  not just an anchor inside the embedded PDF.js iframe — that one silently
+  does nothing if the CDN script never loads (see `citation_viewer.py`'s
+  own docstring on that being unverified from this environment), so a
+  Streamlit-native link outside the iframe is the one that's guaranteed to
+  actually open in a new tab.
+- Only ONE citation is ever recorded per extracted field
+  (`CONTRACT_FIELD_EXTRACTS.SOURCE_DOC_ID`/`SOURCE_NODE_ID`/`SOURCE_QUOTE`
+  are single columns, not a list) — `extract_stock_fields_for_contract`
+  stores `query_engine.search()`'s *top* citation only, even when its
+  answer text cites several documents inline as `[1]`, `[2]`, etc. The
+  Contract Register's new tabular view (`_render_fields_table`, toggled
+  via **"Show extracted fields as a table"**) reflects this honestly: one
+  "Source" link per row (the top citation), not a link per inline
+  citation number. Tracking every citation, not just the top one, would
+  need a schema change (a `CITED_DOCS` VARIANT column or similar) — not
+  done here.
 - Indexing (`ingestion/index_builder.py`) can fail with `Cortex response
   was not valid JSON: Unterminated string...` — CONFIRMED on a live
   account for 3 dense contract documents under

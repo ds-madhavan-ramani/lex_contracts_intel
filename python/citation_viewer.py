@@ -54,12 +54,17 @@ _PDFJS_BASE = f"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/{_PDFJS_VERSION}"
 
 
 def get_presigned_url(session, project: ProjectConfig, stage_path: str,
-                      expiry_secs: int = 3600) -> Optional[str]:
+                      expiry_secs: int = 3600) -> tuple:
     """stage_path is RAW_DOCUMENTS.STAGE_PATH, e.g.
     'MEDSCOMA.DATA_LEX.DOCS_STAGE/CW12345_Executed.pdf' — strips the leading
     qualified-stage prefix to get the path GET_PRESIGNED_URL expects
-    relative to the stage. Returns None (never raises) if the file can't
-    be resolved — a broken citation link shouldn't crash the page it's on."""
+    relative to the stage. Returns (url, error) — never raises — where
+    exactly one of the two is set: (url, None) on success, (None,
+    error_message) on failure. The error message is surfaced in the UI
+    (citation_panel_ui.py), not just logged, since a silent "couldn't
+    generate a link" with no reason gives a reviewer nothing to act on —
+    same reasoning as stage_pickup.py's failure-surfacing earlier in this
+    project."""
     qualified_stage = project.qualified_stage
     prefix = f"{qualified_stage}/"
     relative_path = stage_path[len(prefix):] if stage_path.startswith(prefix) else stage_path
@@ -78,10 +83,26 @@ def get_presigned_url(session, project: ProjectConfig, stage_path: str,
             f"SELECT GET_PRESIGNED_URL(@{qualified_stage}, ?, ?) AS URL",
             params=[relative_path, expiry_secs],
         ).collect()[0]
-        return row["URL"]
-    except Exception:
+        if not row["URL"]:
+            return None, "GET_PRESIGNED_URL returned no URL for this path (file may not exist on the stage)"
+        return row["URL"], None
+    except Exception as e:  # noqa: BLE001 — a broken citation link shouldn't crash the page it's on
         logger.warning("EVENT=PRESIGNED_URL_FAILED stage_path=%r", stage_path, exc_info=True)
+        return None, str(e)
+
+
+def get_citation_url_for_field(session, project: ProjectConfig, field: dict) -> Optional[str]:
+    """Convenience wrapper over get_presigned_url for a
+    contract_extraction.get_contract_fields() row — used by the Contract
+    Register/Contract Lookup tabular views, which just need a URL or
+    nothing (no separate error-reason display the way the citation panel
+    gives). Returns None if the field has no recorded source at all, or
+    if presigning fails for any reason."""
+    stage_path = field.get("SOURCE_STAGE_PATH")
+    if not stage_path:
         return None
+    url, _error = get_presigned_url(session, project, stage_path)
+    return url
 
 
 def is_pdf(file_name: str) -> bool:
