@@ -10,8 +10,11 @@ citation panel on the side and matching .docx/.pdf exports (served from
 contract_output_cache's stage cache when the async pickup Task has
 already produced them; built live otherwise) — the free-form
 question-answering engine this was originally built around
-(query_engine.search()) is not a user-facing feature right now; it's still
-what contract_extraction.py runs under the hood.
+(query_engine.search()) is not a user-facing feature right now, and (see
+that module's own docstring) isn't currently called by anything else in
+this app either — contract_extraction.py's stock-field extraction moved
+to reading full documents directly instead of that engine's narrow
+per-question retrieval.
 
 This deployment is dedicated to one project (LEX) — a separate "select a
 project" landing screen before you can even see this page isn't useful for
@@ -113,8 +116,11 @@ if status.linked_document_count == 0:
 if status.extracted_field_count == 0:
     st.info(f"**{status.cw_number}** has linked documents but hasn't been extracted yet.")
     if st.button("Run extraction now", type="primary"):
+        status_line = st.empty()
         with st.spinner("Answering the standard questions…"):
-            contract_extraction.extract_stock_fields_for_contract(session, project, status.contract_id)
+            contract_extraction.extract_stock_fields_for_contract(
+                session, project, status.contract_id, on_progress=lambda msg: status_line.caption(msg)
+            )
             contract_output_cache.cache_contract_outputs(session, project, status.contract_id)
         st.rerun()
     st.stop()
@@ -125,8 +131,11 @@ if not status.is_extraction_current:
         "extracted — the answers below may be out of date."
     )
     if st.button("Re-run extraction", type="primary"):
+        status_line = st.empty()
         with st.spinner("Re-answering the standard questions…"):
-            contract_extraction.extract_stock_fields_for_contract(session, project, status.contract_id)
+            contract_extraction.extract_stock_fields_for_contract(
+                session, project, status.contract_id, on_progress=lambda msg: status_line.caption(msg)
+            )
             contract_output_cache.cache_contract_outputs(session, project, status.contract_id)
         st.rerun()
 

@@ -68,6 +68,15 @@ def get_presigned_url(session, project: ProjectConfig, stage_path: str,
     qualified_stage = project.qualified_stage
     prefix = f"{qualified_stage}/"
     relative_path = stage_path[len(prefix):] if stage_path.startswith(prefix) else stage_path
+    if not relative_path:
+        # CONFIRMED on a live account: a RAW_DOCUMENTS.STAGE_PATH stored as
+        # exactly the bare stage prefix with no filename (a data issue in
+        # whatever ingested that row, not something to guess at here)
+        # leaves relative_path empty, and GET_PRESIGNED_URL raises "Argument
+        # 2 ... cannot be null or empty" — a confusing SQL compilation
+        # error to surface as-is. Caught here with a clear reason instead.
+        logger.warning("EVENT=PRESIGNED_URL_EMPTY_PATH stage_path=%r", stage_path)
+        return None, f"no filename recorded in this document's stage path ({stage_path!r})"
     try:
         # The stage reference is inlined as a literal, NOT a bind
         # parameter — this codebase already hit the equivalent gotcha with
