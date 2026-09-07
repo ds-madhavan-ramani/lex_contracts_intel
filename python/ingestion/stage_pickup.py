@@ -84,7 +84,23 @@ import json
 import re
 import uuid
 from dataclasses import dataclass
-from typing import List, Optional, Set
+from typing import Callable, List, Optional, Set
+
+# Called with a single human-readable string after each meaningful step
+# (a file processed, a contract's extraction finished, etc.) when given —
+# None (the default, and what the scheduled Task's stored procedure call
+# always uses) means "don't bother". Lets a caller running this in-process
+# (the Sync Status page's "Check for new files now" button, same pattern
+# ingestion/file_ingest.py's callers already use — see that module's own
+# Streamlit callers for the precedent) show live progress instead of one
+# opaque spinner for the whole run, without this module needing to know
+# anything about Streamlit.
+ProgressCallback = Optional[Callable[[str], None]]
+
+
+def _report(on_progress: ProgressCallback, message: str) -> None:
+    if on_progress:
+        on_progress(message)
 
 from config import ProjectConfig, MIN_PARSED_TEXT_CHARS
 import contract_linking
@@ -272,7 +288,8 @@ def list_staged_files(session) -> List[StagedFile]:
     return staged
 
 
-def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFile]) -> List[PickupResult]:
+def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFile],
+                         on_progress: ProgressCallback = None) -> List[PickupResult]:
     results: List[PickupResult] = []
     schema = project.qualified_schema
     stage = project.qualified_stage
@@ -281,7 +298,8 @@ def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFil
     # run — drives the BASE-then-VARIATION heuristic (see module docstring).
     linked_counts = {}
 
-    for item in staged:
+    for i, item in enumerate(staged, start=1):
+        _report(on_progress, f"[{i}/{len(staged)}] {item.cw_number}/{item.file_name} — parsing…")
         try:
             existing = session.sql(
                 f"SELECT DOC_ID, SOURCE_HASH FROM {schema}.RAW_DOCUMENTS WHERE SOURCE_ITEM_ID = ?",
@@ -313,6 +331,7 @@ def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFil
             if len(raw_text.strip()) < MIN_PARSED_TEXT_CHARS:
                 results.append(PickupResult(item.file_name, item.cw_number, "FAILED",
                                              error="Parsed text too short"))
+                _report(on_progress, f"[{i}/{len(staged)}] {item.file_name} — FAILED (parsed text too short)")
                 continue
 
             # Hashed on parsed text, not file bytes — matches
@@ -325,6 +344,7 @@ def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFil
                 results.append(PickupResult(item.file_name, item.cw_number, "SKIPPED_DUPLICATE",
                                              doc_id=existing[0]["DOC_ID"]))
                 _mark_processed(session, item)
+                _report(on_progress, f"[{i}/{len(staged)}] {item.file_name} — unchanged, skipped")
                 continue
 
             session.sql(
@@ -347,7 +367,15 @@ def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFil
             if prior_links is None:
                 prior_links = len(contract_linking.list_family_documents(session, project, contract_id))
             doc_role = "BASE" if prior_links == 0 else "VARIATION"
-            contract_linking.link_document(session, project, contract_id, doc_id, doc_role)
+            # sequence_no: the order files for this contract were processed
+            # in this run — a best-effort recency signal query_engine.py
+            # uses to prefer a later document's answer when documents
+            # conflict (see link_document's own docstring on this
+            # heuristic's limits: it reflects processing order, not
+            # necessarily true real-world chronology, if files are staged
+            # out of order across separate runs).
+            contract_linking.link_document(session, project, contract_id, doc_id, doc_role,
+                                           sequence_no=prior_links + 1)
             linked_counts[contract_id] = prior_links + 1
 
             status = "UPDATED" if existing else "INGESTED"
@@ -358,6 +386,7 @@ def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFil
                       file=item.file_name, cw=item.cw_number, status=status, doc_role=doc_role)
 
             _mark_processed(session, item)
+            _report(on_progress, f"[{i}/{len(staged)}] {item.file_name} — {status} ({doc_role})")
 
         except Exception as e:  # noqa: BLE001 — one bad file shouldn't abort the whole run
             logger.exception("EVENT=STAGE_PICKUP_ERROR file=%s cw=%s", item.file_name, item.cw_number)
@@ -367,27 +396,40 @@ def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFil
             # tick rather than silently lost. See this module's docstring
             # on why a stuck FAILED file needs a human to look rather than
             # retrying forever unattended.
+            _report(on_progress, f"[{i}/{len(staged)}] {item.file_name} — FAILED ({e})")
 
     _log_sync_run(session, project, results)
     return results
 
 
-def run_stage_pickup(session, project_code: str = "LEX") -> str:
+def run_stage_pickup(session, project_code: str = "LEX", on_progress: ProgressCallback = None) -> str:
     """Entry point for the scheduled Task (sql/04_stage_pickup_task.sql)
-    and for manual/ad hoc runs (a notebook cell, a worksheet CALL). Lists
-    every file currently in NETWORK_DRIVE_INBOX_STAGE, ingests/links/
-    indexes each one not already up to date, then runs stock-field
-    extraction once per contract actually touched this run — not once per
-    file, so a CW folder with several files only needs one extraction
-    pass."""
+    and for manual/ad hoc runs (a notebook cell, a worksheet CALL, or the
+    Sync Status page's "Check for new files now" button, which imports and
+    calls this directly in-process — same pattern ingestion/file_ingest.py's
+    Streamlit callers already use — passing on_progress so the button can
+    show live per-file/per-contract status instead of one opaque spinner
+    for the whole run). Lists every file currently in
+    NETWORK_DRIVE_INBOX_STAGE, ingests/links/indexes each one not already
+    up to date, then runs stock-field extraction once per contract
+    actually touched this run — not once per file, so a CW folder with
+    several files only needs one extraction pass.
+
+    on_progress is never passed by the stored procedure the scheduled Task
+    calls (CALL RUN_LEX_STAGE_PICKUP() takes no arguments) — it's None
+    there, and every _report() call below is then a no-op, so this
+    parameter changes nothing about the Task's own behavior."""
     from config import load_project
     project = load_project(session, project_code)
 
+    _report(on_progress, "Listing files in NETWORK_DRIVE_INBOX_STAGE…")
     staged = list_staged_files(session)
-    results = pick_up_staged_files(session, project, staged)
+    _report(on_progress, f"Found {len(staged)} file(s) to process.")
+    results = pick_up_staged_files(session, project, staged, on_progress=on_progress)
 
     new_doc_ids = [r.doc_id for r in results if r.status in ("INGESTED", "UPDATED") and r.doc_id]
     if new_doc_ids:
+        _report(on_progress, f"Indexing {len(new_doc_ids)} new/updated document(s)…")
         from ingestion.index_builder import build_index_for_project
         index_result = build_index_for_project(session, project, doc_ids=new_doc_ids, rebuild=True)
     else:
@@ -397,7 +439,8 @@ def run_stage_pickup(session, project_code: str = "LEX") -> str:
         r.contract_id for r in results
         if r.status in ("INGESTED", "UPDATED") and r.contract_id
     }
-    extraction_errors = _run_extraction_for_contracts(session, project, touched_contract_ids)
+    extraction_errors = _run_extraction_for_contracts(session, project, touched_contract_ids,
+                                                        on_progress=on_progress)
 
     ingested = sum(1 for r in results if r.status in ("INGESTED", "UPDATED"))
     skipped = sum(1 for r in results if r.status == "SKIPPED_DUPLICATE")
@@ -422,11 +465,13 @@ def run_stage_pickup(session, project_code: str = "LEX") -> str:
     return summary
 
 
-def _run_extraction_for_contracts(session, project: ProjectConfig, contract_ids: Set[int]) -> List[str]:
+def _run_extraction_for_contracts(session, project: ProjectConfig, contract_ids: Set[int],
+                                  on_progress: ProgressCallback = None) -> List[str]:
     import contract_extraction
     import contract_output_cache
     errors = []
-    for contract_id in contract_ids:
+    for n, contract_id in enumerate(contract_ids, start=1):
+        _report(on_progress, f"Extraction [{n}/{len(contract_ids)}]: contract {contract_id}…")
         try:
             # extract_stock_fields_for_contract already (re)generates the
             # overview/recommended-actions/scorecard synthesis internally
@@ -439,9 +484,11 @@ def _run_extraction_for_contracts(session, project: ProjectConfig, contract_ids:
             # docstring for the PACKAGES caveat this adds to the stored
             # procedure that calls this function.
             contract_output_cache.cache_contract_outputs(session, project, contract_id)
+            _report(on_progress, f"Extraction [{n}/{len(contract_ids)}]: contract {contract_id} — done")
         except Exception as e:  # noqa: BLE001 — one contract's extraction failing shouldn't block the rest
             logger.exception("EVENT=STAGE_PICKUP_EXTRACTION_FAILED contract_id=%s", contract_id)
             errors.append(f"contract_id={contract_id}: {e}")
+            _report(on_progress, f"Extraction [{n}/{len(contract_ids)}]: contract {contract_id} — FAILED ({e})")
     return errors
 
 

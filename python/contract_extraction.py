@@ -275,8 +275,16 @@ def extract_stock_fields_for_contract(session, project: ProjectConfig, contract_
 
     results: List[FieldExtractResult] = []
     for field_key, question in STOCK_FIELDS:
+        # contract_id lets search() tag each excerpt with its recency
+        # within this contract's family (EFFECTIVE_DATE/SEQUENCE_NO/
+        # DOC_ROLE) and tell synthesis to prefer the more recent document
+        # when documents disagree — see search()'s own docstring. This
+        # matters here specifically: a contract can have 2-20+ linked
+        # files (base, variations, extensions, renewals), and a later one
+        # can restate something (an expiry date, a value) the base or an
+        # earlier variation already said, superseding it.
         answer = search(session, project, question, use_cache=True,
-                        restrict_to_doc_ids=family_doc_ids)
+                        restrict_to_doc_ids=family_doc_ids, contract_id=contract_id)
         confidence = _confidence_for(answer.answer, answer.cited_docs)
         top = answer.top_citation
         excerpt = (top or {}).get("excerpt", "")

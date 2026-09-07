@@ -98,7 +98,8 @@ def get_or_create_contract(session, project: ProjectConfig, cw_number: str,
 
 
 def link_document(session, project: ProjectConfig, contract_id: int, doc_id: int,
-                  doc_role: str, effective_date=None, linked_by: str = "AUTO") -> None:
+                  doc_role: str, effective_date=None, linked_by: str = "AUTO",
+                  sequence_no: Optional[int] = None) -> None:
     """Idempotent on (CONTRACT_ID, DOC_ID) — re-linking the same document to
     the same contract just updates its role/date rather than erroring or
     duplicating, since CONTRACT_DOCUMENT_LINK has a UNIQUE constraint on
@@ -108,7 +109,15 @@ def link_document(session, project: ProjectConfig, contract_id: int, doc_id: int
     as SQLBuilder's RAW_DOCUMENTS merges: a bare `? AS EFFECTIVE_DATE`
     against this DATE column fails on effective_date=None (the default,
     and what every caller in this codebase currently passes) with "Date
-    'None' is not recognized" — TRY_TO_DATE(NULL) is just NULL."""
+    'None' is not recognized" — TRY_TO_DATE(NULL) is just NULL.
+
+    sequence_no: no UI sets this (or effective_date) today — stage_pickup.py
+    is currently the only caller that ever passes a real value, using the
+    order files were processed in one pickup run as a best-effort ordering
+    signal (see its own docstring on that heuristic's limits). Left NULL
+    by any other caller, same as effective_date. query_engine.search()'s
+    contract_id parameter reads both to resolve conflicting information
+    across a contract's linked documents in favor of the more recent one."""
     if doc_role not in DOC_ROLES:
         raise ValueError(f"doc_role must be one of {DOC_ROLES}, got {doc_role!r}")
 
@@ -116,15 +125,17 @@ def link_document(session, project: ProjectConfig, contract_id: int, doc_id: int
     session.sql(
         f"""MERGE INTO {schema}.CONTRACT_DOCUMENT_LINK AS tgt
             USING (SELECT ? AS CONTRACT_ID, ? AS DOC_ID, ? AS DOC_ROLE,
-                          TRY_TO_DATE(?) AS EFFECTIVE_DATE, ? AS LINKED_BY) AS src
+                          TRY_TO_DATE(?) AS EFFECTIVE_DATE, ? AS LINKED_BY,
+                          ? AS SEQUENCE_NO) AS src
             ON tgt.CONTRACT_ID = src.CONTRACT_ID AND tgt.DOC_ID = src.DOC_ID
             WHEN MATCHED THEN UPDATE SET
                 DOC_ROLE = src.DOC_ROLE, EFFECTIVE_DATE = src.EFFECTIVE_DATE,
-                LINKED_BY = src.LINKED_BY
+                LINKED_BY = src.LINKED_BY, SEQUENCE_NO = src.SEQUENCE_NO
             WHEN NOT MATCHED THEN INSERT
-                (CONTRACT_ID, DOC_ID, DOC_ROLE, EFFECTIVE_DATE, LINKED_BY)
-                VALUES (src.CONTRACT_ID, src.DOC_ID, src.DOC_ROLE, src.EFFECTIVE_DATE, src.LINKED_BY)""",
-        params=[contract_id, doc_id, doc_role, effective_date, linked_by],
+                (CONTRACT_ID, DOC_ID, DOC_ROLE, EFFECTIVE_DATE, LINKED_BY, SEQUENCE_NO)
+                VALUES (src.CONTRACT_ID, src.DOC_ID, src.DOC_ROLE, src.EFFECTIVE_DATE, src.LINKED_BY,
+                        src.SEQUENCE_NO)""",
+        params=[contract_id, doc_id, doc_role, effective_date, linked_by, sequence_no],
     ).collect()
     log_event(logger, "DOCUMENT_LINKED", project.project_code,
               contract_id=contract_id, doc_id=doc_id, doc_role=doc_role)

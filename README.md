@@ -110,7 +110,16 @@ CONTRACT_REGISTER  ◄───────────────────�
         │        query_engine.search() scoped to the contract's linked
         │        documents (restrict_to_doc_ids), then synthesizes the
         │        Executive Assessment narrative, Recommended Actions, and
-        │        classification scorecard from the extracted fields
+        │        classification scorecard from the extracted fields.
+        │        A contract can have 2-20+ linked files (base, variations,
+        │        extensions, renewals) — search()'s contract_id parameter
+        │        tags each excerpt with its recency within that family
+        │        (EFFECTIVE_DATE if set, else SEQUENCE_NO, else DOC_ROLE)
+        │        and tells synthesis to prefer the more recent document
+        │        when documents disagree, so a later variation's restated
+        │        expiry/value supersedes an earlier one instead of the
+        │        answer depending on which excerpt retrieval happened to
+        │        rank higher
         ▼                          │
 CONTRACT_FIELD_EXTRACTS  ◄─────────┘
   ("History") — answer, exact cited excerpt, a verified short highlight
@@ -461,6 +470,31 @@ from this environment, though:
   set including the empty-data edge case) but not visually proofed in a
   PDF viewer from this environment, and not a pixel-for-pixel match of the
   Word template's styling by design (see that module's own docstring).
+- The Sync Status page's "Check for new files now" button calls
+  `ingestion.stage_pickup.run_stage_pickup()` directly in-process (same
+  pattern `ingestion.file_ingest.ingest_uploaded_files()`'s Streamlit
+  callers already use) instead of `CALL RUN_LEX_STAGE_PICKUP()`, so an
+  `on_progress` callback can show live per-file/per-contract status
+  instead of one opaque spinner for the whole run. The scheduled Task
+  still goes through the stored procedure, unaffected — both paths call
+  the identical function underneath, `on_progress` is just `None` there.
+- Multi-document recency (`query_engine.search()`'s `contract_id`
+  parameter, used by `contract_extraction.py`): `EFFECTIVE_DATE` (the most
+  trustworthy signal) is not populated by anything in this codebase today
+  — no UI sets it, and no extraction step derives it from document text
+  either. The next-best signal, `SEQUENCE_NO`, is set by
+  `ingestion/stage_pickup.py` as the order files for a contract were
+  processed *in one pickup run* — a genuine but weaker signal, since it
+  reflects processing order, not necessarily true chronology, if the same
+  contract's files are staged across separate runs out of order. The
+  final fallback, `DOC_ROLE` (`VARIATION`/`EXTENSION`/etc. assumed later
+  than `BASE`), is the coarsest of the three. All of this degrades
+  gracefully — a family with none of these signals set gets no recency
+  tag at all and behaves exactly as before this change — but it means the
+  actual precedence given today is mostly "whichever file this run
+  processed later," not a verified real-world signing date. Setting a
+  real `EFFECTIVE_DATE` (once some caller actually does) immediately
+  takes priority over both fallbacks with no code change needed.
 
 ## Open items
 
