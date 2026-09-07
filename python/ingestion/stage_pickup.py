@@ -401,14 +401,25 @@ def run_stage_pickup(session, project_code: str = "LEX") -> str:
 
     ingested = sum(1 for r in results if r.status in ("INGESTED", "UPDATED"))
     skipped = sum(1 for r in results if r.status == "SKIPPED_DUPLICATE")
-    failed = sum(1 for r in results if r.status == "FAILED")
+    failed_results = [r for r in results if r.status == "FAILED"]
     index_note = f", indexed {index_result.indexed} (failed {index_result.failed})" if index_result else ""
-    return (
+    summary = (
         f"Stage pickup: {len(staged)} file(s) found, {ingested} ingested/updated, "
-        f"{skipped} unchanged, {failed} failed{index_note}. "
+        f"{skipped} unchanged, {len(failed_results)} failed{index_note}. "
         f"Extraction run for {len(touched_contract_ids)} contract(s), "
         f"{len(extraction_errors)} extraction error(s)."
     )
+    # Surface WHY a file failed directly in the return value -- this is
+    # what the Sync Status "Check for new files now" button displays, and
+    # is the only place a failure reason is visible without digging
+    # through stored-procedure logs.
+    if failed_results:
+        summary += " Failures: " + "; ".join(
+            f"{r.file_name} ({r.error})" for r in failed_results
+        )
+    if extraction_errors:
+        summary += " Extraction errors: " + "; ".join(extraction_errors)
+    return summary
 
 
 def _run_extraction_for_contracts(session, project: ProjectConfig, contract_ids: Set[int]) -> List[str]:
