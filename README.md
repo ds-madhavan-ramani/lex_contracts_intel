@@ -486,16 +486,46 @@ from this environment, though:
   contracts — that retrieval/reranking pipeline wasn't reliably surfacing
   the right section for a given question even when the answer was
   genuinely in the documents. `extract_stock_fields_for_contract` now
-  runs one "agent" per template section (`FIELD_GROUPS` — Contract detail
-  / Executive Assessment / Commercial, Performance and Renewal
-  Assessment), each a single Cortex call that reads **every** one of the
-  contract's linked documents in full (base + every variation/extension/
-  novation, oldest first) and answers that section's ~5-8 questions at
-  once, explicitly instructed to narrate how a fact evolved across
-  documents rather than just stating the latest value. `query_engine.py`
-  is no longer called by anything in the live app as a result — kept as
+  runs one "agent" per small cluster of 2-3 closely related fields
+  (`FIELD_GROUPS` — 10 clusters covering the 21 stock fields, e.g.
+  "Novation & confidentiality", "Pricing & labour"), each a single Cortex
+  call that reads **every** one of the contract's linked documents in
+  full (base + every variation/extension/novation, oldest first),
+  explicitly instructed to narrate how a fact evolved across documents
+  rather than just stating the latest value. `query_engine.py` is no
+  longer called by anything in the live app as a result — kept as
   groundwork for a possible future free-form chat feature, per its own
   and `Chat.py`'s docstrings.
+
+  CONFIRMED on a live account: an earlier version of this ran one agent
+  per whole template section (3 calls of ~5-8 questions each, not 10 of
+  2-3) and produced noticeably more LOW-confidence fields than the
+  10-cluster version — cramming that many questions into one call over a
+  large multi-document context measurably hurt the model's ability to
+  correctly name which document a genuine verbatim quote came from.
+  `_extract_field_group` now also double-checks a quote against every
+  document in the family before giving up on it, not just the one
+  document number the model claimed — a real quote misattributed to the
+  wrong document was previously discarded as "unverified" and dragged
+  confidence down to LOW for an answer that was actually well-grounded.
+  These agents still run one at a time, not concurrently — Snowpark's
+  session isn't documented as safe for concurrent statement execution
+  across threads, and this app only has the one session
+  Streamlit-in-Snowflake hands it, so there's no straightforward way to
+  parallelize across independent Snowflake connections from inside it.
+  Ten sequential full-family reads costs roughly 3x the input tokens and
+  wall time of the earlier 3-agent version per extraction run.
+
+  The extraction prompt also now asks the model to end a finding with a
+  one-sentence practical risk assessment (e.g. "Assessment: consent
+  required; medium risk for ownership changes") for judgement-style
+  questions, matching the reviewer-style framing of the Microsoft
+  CoPilot-generated reference summary this was benchmarked against for
+  CW20841 — and `generate_classification_scorecard`'s prompt now
+  explicitly tells the model to be decisive (e.g. rate `OVERALL_CLASSIFICATION`
+  as High when the findings describe safety-critical/24-7/high-value
+  operations) rather than defaulting to a hedged "Moderate" rating that
+  can end up inconsistent with what the detailed findings actually say.
 
   Document ordering (oldest → newest, so the model can narrate the
   evolution correctly) uses the same `EFFECTIVE_DATE` → `SEQUENCE_NO` →
