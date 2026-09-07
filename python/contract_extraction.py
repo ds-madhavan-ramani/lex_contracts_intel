@@ -12,20 +12,41 @@ COMMERCIAL_ASSESSMENT_FIELDS below for how the flat STOCK_FIELDS list maps
 onto the template's three tables.
 
 LEX-specific: not part of the generic project-llm-wiki template this was
-forked from. Each of the three template sections (FIELD_GROUPS) is
-answered by one "agent" — one Cortex call reading every one of the
-contract's linked documents in FULL (base + every variation/extension/
-novation in the family), not narrow per-question retrieval. CONFIRMED on
-a live account: an earlier design here called query_engine.search() once
-per field, scoped to the family via restrict_to_doc_ids — sharing that
-engine's retrieval/reranking pipeline — and it kept returning "the
-excerpts provided do not contain sufficient information" for most fields
-on real, densely-written contracts, because that pipeline wasn't
-reliably surfacing the right section for a given question even when the
-answer was genuinely in the documents. Reading the full family directly
-per section closes that gap entirely for a workload where the total text
-(a handful of PDFs) comfortably fits in one call — see
-extract_stock_fields_for_contract and _extract_field_group.
+forked from. Every field is answered by one of FIELD_GROUPS's small
+"agents" (2-3 closely related fields each, 10 agents total) — one Cortex
+call per agent, each reading every one of the contract's linked documents
+in FULL (base + every variation/extension/novation in the family), not
+narrow per-question retrieval. CONFIRMED on a live account: an earlier
+design here called query_engine.search() once per field, scoped to the
+family via restrict_to_doc_ids — sharing that engine's retrieval/
+reranking pipeline — and it kept returning "the excerpts provided do not
+contain sufficient information" for most fields on real, densely-written
+contracts, because that pipeline wasn't reliably surfacing the right
+section for a given question even when the answer was genuinely in the
+documents. Reading the full family directly closes that gap entirely for
+a workload where the total text (a handful of PDFs) comfortably fits in
+one call. Fields are kept in small clusters rather than one call per
+whole template section (an earlier version of this design) because
+CONFIRMED on a live account: cramming 5-8 unrelated questions into one
+JSON response measurably hurt per-field quote precision — the model
+would name the wrong document number for an otherwise-genuine verbatim
+quote when juggling that many questions over a large multi-document
+context at once, which _extract_field_group used to treat as
+"unverified" and downgrade to LOW confidence purely because of that
+misattribution, not because the underlying answer was actually weak. See
+extract_stock_fields_for_contract and _extract_field_group — the latter
+now double-checks a quote against every document in the family, not just
+the one the model named, before giving up on it.
+
+These are still run one agent at a time, not concurrently: Snowpark's
+Session/connection isn't documented as safe for concurrent statement
+execution from multiple threads, and this app only has the one session
+Streamlit-in-Snowflake hands it — there's no straightforward way to open
+several independent Snowflake connections from inside this app to safely
+parallelize across. Ten sequential full-family reads (vs. three
+previously) costs roughly 3x more input tokens and wall time per
+extraction run; see FIELD_GROUPS for the tradeoff this makes instead
+(narrower focus per call over raw parallelism).
 
 Extraction only ever runs on demand (first lookup of a contract, or an
 explicit re-run after its documents change) — never on every page view.
@@ -90,7 +111,11 @@ _QUESTIONS = {
     "COMPLEXITY":
         "Describe the complexity of the goods and/or services supplied under this contract.",
     "SEPARABLE_PORTIONS":
-        "Does this contract identify separable portions of the work? If so, what are they?",
+        "For procurement purposes, could any part of the services be separately tendered, terminated, or "
+        "transferred without affecting the rest? Answer based on how the services are actually delivered as "
+        "an operating model, not merely how the scope-of-work document happens to be organized into "
+        "schedules or sections — if the services are delivered as one integrated model with no such "
+        "separable portions, say so explicitly rather than listing document sections.",
     "PAYMENT_REGIME":
         "What is the payment regime under this contract — claims process, milestone payments, or something "
         "else — and how does it work?",
@@ -192,15 +217,27 @@ class FieldExtractResult:
 
 
 # One "agent" per group — each reads every one of the contract's linked
-# documents in full and answers just its own group's questions. Three
-# focused calls per contract instead of one call per field (21 narrow,
-# independently-retrieved questions) — see extract_stock_fields_for_contract's
-# own docstring for why the narrow-retrieval design this replaced kept
-# failing on real contracts.
+# documents in full and answers just its own group's 2-3 questions. Ten
+# focused calls per contract: enough to keep each call's attention on a
+# small, closely-related cluster (sharper quotes, per _extract_field_group's
+# own docstring) without going all the way to one call per field (21 full
+# rereads of the same document family would multiply cost further for
+# fields with little left to disambiguate, e.g. SUPPLIER/SERVICES). This
+# grouping is independent of SECTION_FOR_FIELD/CONTRACT_DETAIL_FIELDS/etc.
+# above, which is about which template TABLE a field's UI row renders
+# in — an extraction agent's boundary and a template table's boundary
+# don't need to be the same thing.
 FIELD_GROUPS = [
-    ("Contract detail", CONTRACT_DETAIL_FIELDS),
-    ("Executive Assessment", EXECUTIVE_ASSESSMENT_FIELDS),
-    ("Commercial, Performance and Renewal Assessment", COMMERCIAL_ASSESSMENT_FIELDS),
+    ("Parties & services", ["SUPPLIER", "SERVICES"]),
+    ("Dates & value", ["COMMENCEMENT", "CURRENT_EXPIRY", "CURRENT_VALUE"]),
+    ("Novation & confidentiality", ["NOVATION_ASSIGNMENT", "CONFIDENTIALITY_DISCLOSURE"]),
+    ("Term & complexity", ["TERM_AND_EXTENSIONS", "COMPLEXITY"]),
+    ("Scope & payment", ["SEPARABLE_PORTIONS", "PAYMENT_REGIME"]),
+    ("Security & defects", ["SECURITY", "DEFECTS_LIABILITY"]),
+    ("Pricing & labour", ["PRICE_REVIEW", "EA_LABOUR_EXPOSURE"]),
+    ("Performance & consequences", ["KPI_FRAMEWORK", "COMMERCIAL_CONSEQUENCES"]),
+    ("Termination & renewal", ["TERMINATION", "AUTO_RENEWAL_PERPETUAL_TERM"]),
+    ("Control & status", ["CHANGE_OF_CONTROL", "CURRENT_STATUS"]),
 ]
 
 _NOT_ADDRESSED_TEXT = "Not addressed in any of the linked documents."
@@ -327,6 +364,14 @@ that a question isn't addressed when truly nothing relevant appears
 anywhere in the ENTIRE set below — never merely because one document
 alone doesn't fully resolve it while another does.
 
+Where a question asks about a risk, obligation, restriction, or
+compliance exposure (not a plain fact like a name, date, or dollar
+figure), end the value with one short sentence assessing the practical
+risk or exposure this creates for the party asking the question, in the
+style "Assessment: consent required; medium risk for ownership or entity
+changes." Skip this sentence for purely factual fields where there is no
+risk judgement to make.
+
 QUESTIONS:
 {questions_block}
 
@@ -398,10 +443,26 @@ def _extract_field_group(session, project: ProjectConfig, group_label: str, fiel
         value = (entry.get("value") or "").strip()
         source_doc_id = doc_id_by_number.get(entry.get("source_document"))
         quote = (entry.get("quote") or "").strip()
-        if quote and source_doc_id and _normalize_for_match(quote) not in _normalize_for_match(
-            text_by_doc_id.get(source_doc_id, "")
-        ):
-            quote = ""  # unverified — see _extract_highlight_phrase's identical principle
+        if quote:
+            normalized_quote = _normalize_for_match(quote)
+            claimed_text = text_by_doc_id.get(source_doc_id, "") if source_doc_id else ""
+            if normalized_quote not in _normalize_for_match(claimed_text):
+                # The model can misattribute which of several documents a
+                # genuine verbatim quote came from when reading them all in
+                # one call — before discarding an otherwise-real quote as
+                # unverified (see _extract_highlight_phrase's identical
+                # principle), check the rest of the family too and correct
+                # the attribution rather than losing a real quote (and the
+                # HIGH confidence it earns) to a wrong document number.
+                matched_doc_id = next(
+                    (doc_id for doc_id, text in text_by_doc_id.items()
+                     if doc_id != source_doc_id and normalized_quote in _normalize_for_match(text)),
+                    None,
+                )
+                if matched_doc_id:
+                    source_doc_id = matched_doc_id
+                else:
+                    quote = ""
         parsed[key] = {"value": value, "source_doc_id": source_doc_id, "quote": quote}
     return parsed
 
@@ -608,7 +669,12 @@ _SCORECARD_PROMPT = """Based on the extracted contract assessment below,
 provide a short classification (3-8 words each, not a full sentence) for
 each of these five categories, consistent with what the detailed
 assessment already says — do not introduce a new judgement that
-contradicts it:
+contradicts it. Be decisive, not hedged: if the assessment describes
+safety-critical, 24/7, or network-wide operations, a high contract value,
+or substantial liquidated-damages/KPI exposure, overall_classification
+and operational_exposure_rating should say so as High — do not default to
+a middle "Moderate" rating out of caution when the underlying findings
+clearly support a higher one.
 
 - overall_classification: overall risk/complexity profile of the contract
 - novation_disclosure_rating: novation/disclosure exposure
