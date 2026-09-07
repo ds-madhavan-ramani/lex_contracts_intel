@@ -32,6 +32,17 @@
 -- stage_pickup.py for the stage-to-stage file copy) is assumed to work as
 -- documented; see that module's own docstring for the GET/PUT fallback if
 -- not.
+--
+-- CONFIRMED on a live account: REMOVE is an unsupported statement type
+-- inside a Python stored procedure ("Unsupported statement type
+-- 'REMOVE_FILES'"), a third instance of the same class of restriction as
+-- items 1 and (separately, in stage_pickup.py's own history) ALTER
+-- SESSION. The inbox stage can therefore never delete a file from inside
+-- this procedure -- stage_pickup.py tracks "already processed" files in
+-- _STAGE_PICKUP_PROCESSED (created below) instead, and
+-- purge_processed_inbox_files() must be run manually from a notebook cell
+-- or worksheet (outside a stored procedure, where REMOVE works fine) to
+-- actually reclaim the space.
 -- ============================================================================
 
 USE ROLE ADVANCEDANALYTICS;
@@ -45,6 +56,18 @@ USE DATABASE MEDSCOMA;
 -- ----------------------------------------------------------------------------
 ALTER STAGE MEDSCOMA.DATA_LEX.NETWORK_DRIVE_INBOX_STAGE
   SET DIRECTORY = (ENABLE = TRUE);
+
+-- ----------------------------------------------------------------------------
+-- 1b. Tracks which inbox files list_staged_files() has already fully
+--     handled, since REMOVE can't run inside the stored procedure below
+--     (see this file's header comment) to actually delete them. Idempotent
+--     to re-run; lives in DATA_LEX so TEARDOWN_PROJECT('LEX', ...) drops it
+--     along with everything else in that schema.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS MEDSCOMA.DATA_LEX._STAGE_PICKUP_PROCESSED (
+  RELATIVE_PATH VARCHAR(16777216) PRIMARY KEY,
+  PROCESSED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+);
 
 -- ----------------------------------------------------------------------------
 -- 2. A stream on that stage — used purely as a scheduling gate (Task step
@@ -139,6 +162,14 @@ ALTER TASK MEDSCOMA.APP_CATALOG.LEX_STAGE_PICKUP_TASK RESUME;
 --   SELECT * FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY(
 --     TASK_NAME => 'LEX_STAGE_PICKUP_TASK')) ORDER BY SCHEDULED_TIME DESC;
 --
+-- Periodic maintenance -- run occasionally from a notebook Python cell or
+-- worksheet, NOT automatically (REMOVE doesn't work inside the stored
+-- procedure above -- see this file's header comment), to actually free
+-- the space every processed file's original copy still occupies:
+--   from ingestion.stage_pickup import purge_processed_inbox_files
+--   removed = purge_processed_inbox_files(session)
+--   print(f"Removed {removed} already-processed file(s) from the inbox stage.")
+--
 -- Removal (e.g. before CALL TEARDOWN_PROJECT('LEX', ...) — that generic
 -- proc doesn't know about this LEX-specific task, so suspend/drop it
 -- first):
@@ -146,4 +177,7 @@ ALTER TASK MEDSCOMA.APP_CATALOG.LEX_STAGE_PICKUP_TASK RESUME;
 --   DROP TASK IF EXISTS MEDSCOMA.APP_CATALOG.LEX_STAGE_PICKUP_TASK;
 --   DROP STREAM IF EXISTS MEDSCOMA.DATA_LEX.NETWORK_DRIVE_INBOX_STREAM;
 --   DROP PROCEDURE IF EXISTS MEDSCOMA.APP_CATALOG.RUN_LEX_STAGE_PICKUP();
+--   DROP TABLE IF EXISTS MEDSCOMA.DATA_LEX._STAGE_PICKUP_PROCESSED;
+-- (also lives in DATA_LEX, so CALL TEARDOWN_PROJECT('LEX', ...) drops it
+-- anyway if the schema itself is torn down)
 -- ============================================================================

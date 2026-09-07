@@ -419,11 +419,28 @@ from this environment, though:
   — unrelated to the backslash-doubling gotcha documented elsewhere in
   this file for `NETWORK_DRIVE_DEFAULT_PATH`, which is a different
   escape rule for a different character). The identical unquoted pattern
-  existed in `_remove_from_inbox()`'s per-file cleanup too — fixed there
-  as well, even though it hadn't been exercised yet at the time, since it
-  would have failed the same way. One assumption remains genuinely
-  unverified: `COPY FILES INTO <stage> FROM <stage>` (stage-to-stage, used
-  in `ingestion/stage_pickup.py` to avoid a GET/PUT round trip) behaves as
+  existed in the per-file inbox cleanup too — fixed there as well, even
+  though it hadn't been exercised yet at the time, since it would have
+  failed the same way. That fix immediately hit a third, more fundamental
+  wall on the very next live run: `REMOVE` itself is confirmed
+  **unsupported inside a Python stored procedure** ("Unsupported
+  statement type 'REMOVE_FILES'") — no quoting fixes this, it's the same
+  class of categorical restriction as `CREATE TEMPORARY TABLE` and `ALTER
+  SESSION` above, just for a third statement type. `stage_pickup.py` was
+  redesigned around this: instead of deleting a handled file from
+  `NETWORK_DRIVE_INBOX_STAGE`, its path is recorded in a permanent
+  `_STAGE_PICKUP_PROCESSED` table (created by
+  `sql/04_stage_pickup_task.sql`), and `list_staged_files()`'s
+  `DIRECTORY()` query left-joins against that table to exclude anything
+  already handled — so a processed file is never reprocessed, it just
+  stays physically present as harmless dead weight. Actually freeing that
+  space requires `REMOVE`, which still works fine from *outside* a stored
+  procedure (a worksheet, or a notebook cell) —
+  `ingestion/stage_pickup.py`'s `purge_processed_inbox_files(session)`
+  does exactly that and is meant to be run occasionally by hand, never
+  automatically. One assumption remains genuinely unverified: `COPY FILES
+  INTO <stage> FROM <stage>` (stage-to-stage, used in
+  `ingestion/stage_pickup.py` to avoid a GET/PUT round trip) behaves as
   documented — it has a documented fallback in that module's own docstring
   if it doesn't hold.
 - The scheduled Task's *automatic* execution (as opposed to a manual
