@@ -495,6 +495,27 @@ from this environment, though:
   processed later," not a verified real-world signing date. Setting a
   real `EFFECTIVE_DATE` (once some caller actually does) immediately
   takes priority over both fallbacks with no code change needed.
+- Indexing (`ingestion/index_builder.py`) can fail with `Cortex response
+  was not valid JSON: Unterminated string...` — CONFIRMED on a live
+  account for 3 dense contract documents under
+  `SEGMENTATION_GRANULARITY='DETAILED'`, and it's an *output* problem, not
+  an input one: the model's JSON listing every section it found got cut
+  off before finishing, at exactly `utils/cortex_client.py`'s
+  `MAX_JSON_RETRY_TOKENS` ceiling (raised from 16000 to 24000, but not
+  verified against whatever hard output-token ceiling the underlying
+  model itself may have — if the same error recurs at the new ceiling,
+  that's almost certainly it, and no further raise will help).
+  `PROJECTS.MAX_DOCUMENT_CHARS` (the per-chunk size fed to each indexing
+  call) is the other lever, lowered from 100000 to 60000 in both the
+  schema default and the provisioning notebook's own explicit value
+  (which otherwise re-applies 100000 on every re-run of the "Create the
+  LEX project" cell, silently undoing a one-off `UPDATE`) — a smaller
+  chunk means fewer sections found per call, and thus a shorter response,
+  independent of whatever the model's true output ceiling turns out to
+  be. Lower it further (a direct `UPDATE PROJECTS SET MAX_DOCUMENT_CHARS
+  = ... WHERE PROJECT_CODE = 'LEX'` takes effect immediately, no redeploy)
+  if the error still recurs — then re-run **Data Sources → Index →
+  Rebuild all** for whichever documents failed.
 
 ## Open items
 

@@ -75,13 +75,30 @@ CREATE TABLE IF NOT EXISTS PROJECTS (
 
     -- Per-project model / tuning knobs (were hardcoded in config.py)
     ACTIVE_MODEL               VARCHAR(50)  DEFAULT 'claude-haiku-4-5',
-    MAX_DOCUMENT_CHARS          INT          DEFAULT 150000,   -- also doubles as the per-chunk size for
+    MAX_DOCUMENT_CHARS          INT          DEFAULT 60000,    -- also doubles as the per-chunk size for
                                                                 -- documents longer than this — see
                                                                 -- ingestion/index_builder.py's chunked
                                                                 -- indexing (needed for 100-500 page
                                                                 -- contracts; a single call this size
                                                                 -- would truncate, not chunk, before
-                                                                -- that fix existed)
+                                                                -- that fix existed).
+                                                                -- CONFIRMED on a live account: even
+                                                                -- 100000 was still too large under
+                                                                -- DETAILED granularity — a dense
+                                                                -- contract's segmentation response can
+                                                                -- have enough sections to blow past
+                                                                -- utils/cortex_client.py's (also
+                                                                -- raised) MAX_JSON_RETRY_TOKENS
+                                                                -- ceiling ("Unterminated string" — the
+                                                                -- JSON response got cut off, not the
+                                                                -- input text truncated). Existing
+                                                                -- projects keep whatever value their
+                                                                -- PROJECTS row already has (this
+                                                                -- DEFAULT only affects a brand-new
+                                                                -- project, or one whose row is
+                                                                -- explicitly UPDATEd) — lower it
+                                                                -- further if the same error recurs
+                                                                -- even at this size.
     MAX_SECTION_CHARS           INT          DEFAULT 8000,
     QUERY_CACHE_TTL_HOURS        INT          DEFAULT 24,
     MAX_CITATIONS_DISPLAY         INT          DEFAULT 5,

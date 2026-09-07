@@ -80,10 +80,21 @@ quoting what someone said verbatim) — every " that appears INSIDE a
 string value must be escaped as \\". Return ONLY the corrected JSON,
 no commentary, with every internal double-quote properly escaped."""
 
-# Cap for the token budget a truncation retry can request — well within
-# what Cortex models on this account support, so the retry call itself
-# doesn't fail for asking too much.
-MAX_JSON_RETRY_TOKENS = 16000
+# Cap for the token budget a truncation retry can request. CONFIRMED on a
+# live account: a dense contract's DETAILED-granularity segmentation
+# response can still get cut off ("Unterminated string") even at this
+# ceiling — the response used the full 16000-token budget and still
+# hadn't finished, so this was genuinely the binding constraint, not a
+# rejected-request situation. Raised as one of two complementary fixes
+# (the other: a smaller PROJECTS.MAX_DOCUMENT_CHARS chunk size, so fewer
+# sections are found per call in the first place — see
+# ingestion/index_builder.py). UNVERIFIED past this new value: whether the
+# underlying model has its own hard output-token ceiling below this that
+# would make raising it further a no-op regardless of what's requested
+# here — if the same "Unterminated string" error recurs at this new cap,
+# that's the likely explanation, and a smaller chunk size is then the only
+# lever left that actually helps.
+MAX_JSON_RETRY_TOKENS = 24000
 
 
 def _is_truncation_error(error: json.JSONDecodeError, text: str) -> bool:
