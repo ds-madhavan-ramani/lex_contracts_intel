@@ -352,9 +352,18 @@ lead with the direct answer, then the supporting clause language, and stop;
 do not restate the excerpts at length. Format the answer as a bulleted
 list, one point per bullet, with a blank line between bullets — use real
 line breaks, never the literal characters backslash-n. Cite sources inline
-using the bracketed number shown before each excerpt, e.g. [1]. If the
-excerpts don't fully answer the question, say so explicitly rather than
-guessing.{recency_instruction}
+using the bracketed number shown before each excerpt, e.g. [1].
+
+Give the most complete answer the excerpts actually support, even if it's
+partial — state what IS there first, citing it, then note specifically
+what's missing (e.g. "clause 14 sets an initial 3-year term [1], but no
+excerpt confirms whether it has since been extended"). A partial,
+clearly-labeled finding is far more useful to a contracts manager than a
+refusal, and is not the same thing as guessing: guessing means stating
+something not actually in the excerpts, which stays forbidden. Only say
+the excerpts don't address the question when truly nothing relevant is
+present across ALL of them — never as the default response just because
+no single excerpt fully resolves it on its own.{recency_instruction}
 
 QUESTION: {question}
 

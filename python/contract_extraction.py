@@ -120,6 +120,15 @@ STOCK_FIELDS = [
     for key in CONTRACT_DETAIL_FIELDS + EXECUTIVE_ASSESSMENT_FIELDS + COMMERCIAL_ASSESSMENT_FIELDS
 ]
 
+# field_key -> which of the template's tables it belongs to — used by
+# build_fields_table's "Section" column, matching the same grouping the
+# per-section UI (Chat.py / Contract Register) already renders separately.
+SECTION_FOR_FIELD = {
+    **{key: "Contract detail" for key in CONTRACT_DETAIL_FIELDS},
+    **{key: "Executive Assessment" for key in EXECUTIVE_ASSESSMENT_FIELDS},
+    **{key: "Commercial, Performance and Renewal Assessment" for key in COMMERCIAL_ASSESSMENT_FIELDS},
+}
+
 # Human-readable label per field — copied verbatim from the template's own
 # row labels so the Streamlit pages and the generated document always
 # agree with each other and with the template's own wording.
@@ -517,6 +526,37 @@ def get_contract_fields(session, project: ProjectConfig, contract_id: int) -> Li
     # rather than silently omitting a field.
     return [by_key.get(key, {"FIELD_KEY": key, "FIELD_VALUE": None, "CONFIDENCE": None})
             for key, _ in STOCK_FIELDS]
+
+
+def build_fields_table(session, project: ProjectConfig, contract_id: int) -> List[dict]:
+    """Flattens get_contract_fields() into one row per stock field, shaped
+    for a spreadsheet-style review table — the Contract Register/Contract
+    Lookup pages' tabular view (Section, Value, Source, Verified), as an
+    alternative to the per-field boxed layout. Each row carries every raw
+    field straight through (SOURCE_STAGE_PATH, SOURCE_QUOTE, etc.) so the
+    calling page can build a citation link (citation_viewer.py) or render
+    a checkbox without a second query. Only ONE source is ever recorded
+    per field today (CONTRACT_FIELD_EXTRACTS.SOURCE_DOC_ID is a single
+    column, not a list — see extract_stock_fields_for_contract, which
+    stores query_engine.search()'s *top* citation only, even though its
+    answer text may cite several documents inline as [1], [2], ...) — so
+    a row's single "Source" link is the top citation, not a link per
+    inline citation number the answer text might mention."""
+    fields = get_contract_fields(session, project, contract_id)
+    return [
+        {
+            "field_key": f["FIELD_KEY"],
+            "section": SECTION_FOR_FIELD.get(f["FIELD_KEY"], ""),
+            "label": FIELD_LABELS.get(f["FIELD_KEY"], f["FIELD_KEY"]),
+            "value": f.get("FIELD_VALUE"),
+            "confidence": f.get("CONFIDENCE"),
+            "source_quote": f.get("SOURCE_QUOTE"),
+            "source_file_name": f.get("SOURCE_FILE_NAME"),
+            "source_stage_path": f.get("SOURCE_STAGE_PATH"),
+            "is_verified": bool(f.get("IS_VERIFIED")),
+        }
+        for f in fields
+    ]
 
 
 def is_extraction_current(session, project: ProjectConfig, contract_id: int) -> bool:
