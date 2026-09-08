@@ -152,16 +152,20 @@ def unlink_document(session, project: ProjectConfig, contract_id: int, doc_id: i
 def get_contract(session, project: ProjectConfig, contract_id: int) -> Optional[dict]:
     """One contract's own register row: CW number, title, lifecycle
     status, the Executive Assessment narrative (OVERVIEW_SUMMARY),
-    Recommended Actions (a list, parsed from VARIANT), and the
-    classification scorecard (a dict, parsed from VARIANT) —
-    contract_extraction.py's three synthesis outputs. The Contract Lookup
-    page and docx_report.py both read this directly."""
+    Recommended Actions (a list, parsed from VARIANT), the classification
+    scorecard (a dict, parsed from VARIANT), the Key Commercial Risks /
+    Procurement Recommendation / Retender Strategy wrap-up (a dict, parsed
+    from VARIANT), and the condensed one-sentence-per-field summary (a
+    dict, parsed from VARIANT) — contract_extraction.py's five synthesis
+    outputs. The Contract Lookup page and docx_report.py/pdf_report.py all
+    read this directly."""
     import json
     schema = project.qualified_schema
     rows = session.sql(
         f"""SELECT CONTRACT_ID, CW_NUMBER, CONTRACT_TITLE, STATUS,
                    OVERVIEW_SUMMARY, OVERVIEW_GENERATED_AT,
-                   RECOMMENDED_ACTIONS, CLASSIFICATION_SCORECARD
+                   RECOMMENDED_ACTIONS, CLASSIFICATION_SCORECARD,
+                   PROCUREMENT_STRATEGY, CONDENSED_FIELDS
             FROM {schema}.CONTRACT_REGISTER WHERE CONTRACT_ID = ?""",
         params=[contract_id],
     ).collect()
@@ -173,6 +177,12 @@ def get_contract(session, project: ProjectConfig, contract_id: int) -> Optional[
     )
     contract["CLASSIFICATION_SCORECARD"] = (
         json.loads(contract["CLASSIFICATION_SCORECARD"]) if contract.get("CLASSIFICATION_SCORECARD") else {}
+    )
+    contract["PROCUREMENT_STRATEGY"] = (
+        json.loads(contract["PROCUREMENT_STRATEGY"]) if contract.get("PROCUREMENT_STRATEGY") else {}
+    )
+    contract["CONDENSED_FIELDS"] = (
+        json.loads(contract["CONDENSED_FIELDS"]) if contract.get("CONDENSED_FIELDS") else {}
     )
     return contract
 

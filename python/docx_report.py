@@ -58,6 +58,7 @@ _DISCLAIMER = (
 
 _NO_VARIATIONS_TEXT = "No variations, extensions, or novations are currently linked to this contract."
 _NO_ACTIONS_TEXT = "No specific actions flagged."
+_NO_RISKS_TEXT = "No significant commercial risks flagged."
 
 
 class TemplateStructureError(Exception):
@@ -130,13 +131,19 @@ def _set_single_run_text(paragraph, text: str) -> None:
         extra._element.getparent().remove(extra._element)
 
 
-def _replace_bullet_list(blocks, heading_index: int, items: List[str]) -> None:
+def _replace_bullet_list(blocks, heading_index: int, items: List[str],
+                         empty_text: str = _NO_VARIATIONS_TEXT) -> None:
     """Replaces every consecutive 'List Bullet' paragraph immediately
     following blocks[heading_index] with one bullet per item (cloning the
     first placeholder bullet's formatting/style for each), then removes
-    whatever placeholder bullets are left over. items=[] renders a single
-    "nothing to report" bullet rather than leaving the section empty,
-    since an empty section reads as a mistake in a document like this."""
+    whatever placeholder bullets are left over. items=[] renders empty_text
+    as a single "nothing to report" bullet rather than leaving the section
+    empty, since an empty section reads as a mistake in a document like
+    this — callers pass whichever wording actually fits their section
+    (there's no reliable way to infer it from the heading's own text once
+    there's more than one non-generic empty-state message to choose from,
+    see e.g. "Key Commercial Risks" vs. "Recommended Actions" vs.
+    "Significant Variations")."""
     from docx.text.paragraph import Paragraph
 
     bullet_indices = []
@@ -153,7 +160,7 @@ def _replace_bullet_list(blocks, heading_index: int, items: List[str]) -> None:
         )
 
     template_para = blocks[bullet_indices[0]]
-    display_items = items or [_NO_ACTIONS_TEXT if "Action" in blocks[heading_index].text else _NO_VARIATIONS_TEXT]
+    display_items = items or [empty_text]
 
     anchor_element = template_para._p
     for item_text in display_items:
@@ -235,7 +242,7 @@ def build_contract_docx(session, project: ProjectConfig, contract_id: int) -> by
         label += f", {v['EFFECTIVE_DATE']})" if v.get("EFFECTIVE_DATE") else ")"
         summary = v.get("NODE_SUMMARY") or "not yet indexed"
         variation_lines.append(f"{label}: {summary}")
-    _replace_bullet_list(blocks, variations_heading_idx, variation_lines)
+    _replace_bullet_list(blocks, variations_heading_idx, variation_lines, empty_text=_NO_VARIATIONS_TEXT)
 
     # --- Consolidated Procurement Assessment (classification scorecard) ---
     scorecard = contract.get("CLASSIFICATION_SCORECARD") or {}
@@ -245,9 +252,25 @@ def build_contract_docx(session, project: ProjectConfig, contract_id: int) -> by
         for key in contract_extraction.CLASSIFICATION_SCORECARD_FIELDS
     })
 
+    # --- Key Commercial Risks / Procurement Recommendation / Retender
+    # Strategy (see contract_extraction.generate_procurement_strategy) ---
+    strategy = contract.get("PROCUREMENT_STRATEGY") or {}
+    risks_heading_idx = _find_heading_index(blocks, "Key Commercial Risks")
+    _replace_bullet_list(blocks, risks_heading_idx, strategy.get("KEY_COMMERCIAL_RISKS") or [],
+                         empty_text=_NO_RISKS_TEXT)
+
+    recommendation_heading_idx = _find_heading_index(blocks, "Procurement Recommendation")
+    _set_single_run_text(blocks[recommendation_heading_idx + 1],
+                         strategy.get("PROCUREMENT_RECOMMENDATION") or "Not yet generated.")
+
+    retender_heading_idx = _find_heading_index(blocks, "Retender Strategy")
+    _set_single_run_text(blocks[retender_heading_idx + 1],
+                         strategy.get("RETENDER_STRATEGY") or "Not yet generated.")
+
     # --- Recommended Actions ---
     actions_heading_idx = _find_heading_index(blocks, "Recommended Actions")
-    _replace_bullet_list(blocks, actions_heading_idx, contract.get("RECOMMENDED_ACTIONS") or [])
+    _replace_bullet_list(blocks, actions_heading_idx, contract.get("RECOMMENDED_ACTIONS") or [],
+                         empty_text=_NO_ACTIONS_TEXT)
 
     # --- Closing disclaimer ---
     # The final "Note:" paragraph is the last block in the template.
@@ -256,6 +279,107 @@ def build_contract_docx(session, project: ProjectConfig, contract_id: int) -> by
         if isinstance(block, Paragraph) and block.text.strip().startswith("Note:"):
             _set_single_run_text(block, _DISCLAIMER)
             break
+
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def build_contract_docx_condensed(session, project: ProjectConfig, contract_id: int) -> bytes:
+    """Builds a short, ~2-page condensed Contract Review Summary as a
+    fresh .docx — NOT the team's own Contract Workspace Summary Template
+    above, which there's no bundled shorter version of — in the same
+    spirit as the CoPilot-generated reference summary CW20841 was
+    benchmarked against: one-to-two-sentence findings from
+    CONTRACT_REGISTER.CONDENSED_FIELDS (see
+    contract_extraction.generate_condensed_summary) in place of each
+    field's full paragraph-length FIELD_VALUE. Same section order as
+    build_contract_docx above, minus nothing structurally except that
+    Recommended Actions is capped to its top 5 items — this is a length
+    concern, not a different report. No new Cortex calls here, purely
+    formatting."""
+    import io
+    import docx
+
+    contract = contract_linking.get_contract(session, project, contract_id)
+    condensed = contract.get("CONDENSED_FIELDS") or {}
+    fields = {f["FIELD_KEY"]: f for f in contract_extraction.get_contract_fields(session, project, contract_id)}
+    variations = contract_linking.get_significant_variations(session, project, contract_id)
+
+    def condensed_value_of(field_key: str) -> Optional[str]:
+        return condensed.get(field_key) or fields.get(field_key, {}).get("FIELD_VALUE")
+
+    document = docx.Document()
+
+    title_text = (
+        contract.get("CONTRACT_TITLE")
+        or f"{condensed_value_of('SUPPLIER') or contract['CW_NUMBER']} - "
+           f"{condensed_value_of('SERVICES') or contract['CW_NUMBER']}"
+    )
+    document.add_heading(title_text, level=0)
+    document.add_paragraph("Contract Review Summary and Assessment — Condensed")
+
+    def add_kv_table(header, rows):
+        table = document.add_table(rows=1, cols=2)
+        table.style = "Table Grid"
+        table.rows[0].cells[0].text, table.rows[0].cells[1].text = header
+        for key, value in rows:
+            cells = table.add_row().cells
+            cells[0].text = key
+            cells[1].text = value or "Not yet extracted."
+
+    def add_bullets(items, empty_text):
+        for item in (items or [empty_text]):
+            document.add_paragraph(item, style="List Bullet")
+
+    add_kv_table(("Contract detail", "Current position"), [
+        (contract_extraction.FIELD_LABELS[key], condensed_value_of(key))
+        for key in contract_extraction.CONTRACT_DETAIL_FIELDS
+    ])
+
+    document.add_heading("Executive Assessment", level=1)
+    document.add_paragraph(contract.get("OVERVIEW_SUMMARY") or "Not yet generated.")
+    add_kv_table(("Assessment area", "Finding"), [
+        (contract_extraction.FIELD_LABELS[key], condensed_value_of(key))
+        for key in contract_extraction.EXECUTIVE_ASSESSMENT_FIELDS
+    ])
+
+    document.add_heading("Commercial, Performance and Renewal Assessment", level=1)
+    add_kv_table(("Assessment area", "Finding"), [
+        (contract_extraction.FIELD_LABELS[key], condensed_value_of(key))
+        for key in contract_extraction.COMMERCIAL_ASSESSMENT_FIELDS
+    ])
+
+    document.add_heading("Significant Variations", level=2)
+    variation_lines = []
+    for v in variations:
+        label = f"{v['FILE_NAME']} ({v['DOC_ROLE'].replace('_', ' ').title()})"
+        summary = v.get("NODE_SUMMARY") or "not yet indexed"
+        summary = summary if len(summary) <= 160 else summary[:157] + "..."
+        variation_lines.append(f"{label}: {summary}")
+    add_bullets(variation_lines, _NO_VARIATIONS_TEXT)
+
+    document.add_heading("Consolidated Procurement Assessment", level=2)
+    scorecard = contract.get("CLASSIFICATION_SCORECARD") or {}
+    add_kv_table(("Category", "Assessment"), [
+        (contract_extraction.CLASSIFICATION_SCORECARD_LABELS[key], scorecard.get(key))
+        for key in contract_extraction.CLASSIFICATION_SCORECARD_FIELDS
+    ])
+
+    strategy = contract.get("PROCUREMENT_STRATEGY") or {}
+    document.add_heading("Key Commercial Risks", level=2)
+    add_bullets(strategy.get("KEY_COMMERCIAL_RISKS") or [], _NO_RISKS_TEXT)
+
+    document.add_heading("Procurement Recommendation", level=2)
+    document.add_paragraph(strategy.get("PROCUREMENT_RECOMMENDATION") or "Not yet generated.")
+
+    document.add_heading("Retender Strategy", level=2)
+    document.add_paragraph(strategy.get("RETENDER_STRATEGY") or "Not yet generated.")
+
+    document.add_heading("Recommended Actions", level=2)
+    add_bullets((contract.get("RECOMMENDED_ACTIONS") or [])[:5], _NO_ACTIONS_TEXT)
+
+    document.add_paragraph(_DISCLAIMER)
 
     buffer = io.BytesIO()
     document.save(buffer)

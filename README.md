@@ -142,20 +142,48 @@ into the template's tables without reshuffling anything:
 
 | Template section | Fields (`CONTRACT_FIELD_EXTRACTS.FIELD_KEY`) | How it's produced |
 |---|---|---|
-| Contract detail | `SUPPLIER`, `SERVICES`, `COMMENCEMENT`, `CURRENT_EXPIRY`, `CURRENT_VALUE` | Extracted (`query_engine.search()`, cited) |
+| Contract detail | `SUPPLIER`, `SERVICES`, `COMMENCEMENT`, `CURRENT_EXPIRY`, `CURRENT_VALUE` | Extracted — one of `FIELD_GROUPS`'s full-document agents, cited (see "Stock-field extraction reads full documents directly" below) |
 | Executive Assessment — narrative | — | Synthesized from the extracted fields (`generate_contract_overview`) |
 | Executive Assessment — table | `NOVATION_ASSIGNMENT`, `CONFIDENTIALITY_DISCLOSURE`, `TERM_AND_EXTENSIONS`, `COMPLEXITY`, `SEPARABLE_PORTIONS`, `PAYMENT_REGIME`, `SECURITY`, `DEFECTS_LIABILITY` | Extracted, cited |
 | Significant Variations | — | Read from `CONTRACT_DOCUMENT_LINK` (non-BASE roles) + each document's own `DOCUMENT_INDEX` summary — no extra Cortex call |
 | Commercial, Performance and Renewal Assessment | `PRICE_REVIEW`, `EA_LABOUR_EXPOSURE`, `KPI_FRAMEWORK`, `COMMERCIAL_CONSEQUENCES`, `TERMINATION`, `AUTO_RENEWAL_PERPETUAL_TERM`, `CHANGE_OF_CONTROL`, `CURRENT_STATUS` | Extracted, cited |
 | Consolidated Procurement Assessment (scorecard) | `OVERALL_CLASSIFICATION`, `NOVATION_DISCLOSURE_RATING`, `COMMERCIAL_MODEL_RATING`, `OPERATIONAL_EXPOSURE_RATING`, `RENEWAL_POSITION_RATING` | Synthesized from the extracted fields — deliberately *not* independently re-searched, so it can't disagree with the detailed tables above (`generate_classification_scorecard`) |
+| Key Commercial Risks / Procurement Recommendation / Retender Strategy | `KEY_COMMERCIAL_RISKS`, `PROCUREMENT_RECOMMENDATION`, `RETENDER_STRATEGY` | Synthesized from the extracted fields, same reasoning as the scorecard above (`generate_procurement_strategy`) — added to match a forward-looking wrap-up the CoPilot-generated reference summary CW20841 was benchmarked against included and this app's own output didn't |
 | Recommended Actions | — | Synthesized from the extracted fields (`generate_recommended_actions`); an empty list if nothing warrants flagging |
 
-21 extracted fields today. The template can grow — add a
-`(FIELD_KEY, question)` pair to `contract_extraction._QUESTIONS`, put the
-key in whichever `*_FIELDS` group matches where it belongs, and add its
-label to `FIELD_LABELS` — no other code changes needed, as long as the
-`.docx` template itself gains a matching row (`docx_report.py` matches
-table rows by their own label text, not position).
+21 extracted fields + 3 synthesized wrap-up fields today. The template
+can grow — add a `(FIELD_KEY, question)` pair to
+`contract_extraction._QUESTIONS`, put the key in whichever `*_FIELDS`
+group matches where it belongs, and add its label to `FIELD_LABELS` — no
+other code changes needed, as long as the `.docx` template itself gains a
+matching row (`docx_report.py` matches table rows by their own label
+text, not position).
+
+### Condensed (~2-page) output, alongside the full report
+
+Every download button set now offers two pairs, not one: the full
+Contract Workspace Summary (docx/pdf, unchanged) and a condensed pair
+(`docx_condensed`/`pdf_condensed` in `contract_output_cache.py`'s
+`_BUILDERS`) — same section order, same underlying data, but each of the
+21 stock fields is rendered from a one-to-two-sentence condensed version
+(`CONTRACT_REGISTER.CONDENSED_FIELDS`, see
+`contract_extraction.generate_condensed_summary`) instead of its full
+paragraph-length `FIELD_VALUE`, Significant Variations summaries are
+truncated, and Recommended Actions is capped to its top 5 items — in the
+same spirit as the CoPilot-generated reference summary CW20841 was
+benchmarked against, which is itself only about a page long.
+`generate_condensed_summary` is a single cheap synthesis call (it
+compresses already-extracted text, not raw documents, so its cost doesn't
+scale with the size of the contract's document family) run once per
+extraction alongside the other four synthesis steps. The condensed
+`.docx` is a fresh `python-docx` document, not built from
+`assets/Contract_Workspace_Summary_Template.docx` — there's no bundled
+short-form template to match, unlike the full report. UNVERIFIED: actual
+page count depends on the real Word/PDF renderer's line-wrapping for real
+contract data; a mock run with representative-length fake data rendered
+to 2 pages via reportlab's own pagination (checked by counting `/Type
+/Page` objects in the raw PDF bytes), which is encouraging but not a
+substitute for checking a real extraction's condensed output directly.
 
 ## Project configuration
 
@@ -526,6 +554,23 @@ from this environment, though:
   as High when the findings describe safety-critical/24-7/high-value
   operations) rather than defaulting to a hedged "Moderate" rating that
   can end up inconsistent with what the detailed findings actually say.
+
+  CONFIRMED on a live account (comparing a second CW20841 run against
+  CoPilot's own detailed reference output, which rates risk consistently
+  from the contracting client's side): the risk-assessment instruction's
+  original "risk...for the party asking the question" wording was
+  ambiguous enough that several fields (novation, auto-renewal, change of
+  control) got framed as risk *to the supplier* instead — a restriction
+  on the supplier's ability to disclose information read as "bad for the
+  supplier" rather than "protective of the client," which isn't the
+  perspective this register is kept from. The instruction now says
+  explicitly: risk to the client who engaged the supplier named in the
+  SUPPLIER field, never the supplier's own risk. It also now requires
+  committing to exactly one of Low/Medium/High rather than a hedge like
+  "moderate-to-high" (COMPLEXITY's question asks for this rating
+  explicitly too, since it isn't phrased as a "risk" question and so
+  wasn't reliably triggering the generic risk-sentence instruction on its
+  own).
 
   Document ordering (oldest → newest, so the model can narrate the
   evolution correctly) uses the same `EFFECTIVE_DATE` → `SEQUENCE_NO` →

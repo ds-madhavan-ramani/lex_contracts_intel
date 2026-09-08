@@ -50,6 +50,20 @@ CREATE TABLE IF NOT EXISTS CONTRACT_REGISTER (
     -- extracted stock fields, so all three stay consistent with each other.
     RECOMMENDED_ACTIONS        VARIANT,
     CLASSIFICATION_SCORECARD    VARIANT,
+    -- The template's forward-looking "Key Commercial Risks" /
+    -- "Procurement Recommendation" / "Retender Strategy" sections (a JSON
+    -- object with keys KEY_COMMERCIAL_RISKS (list), PROCUREMENT_RECOMMENDATION,
+    -- RETENDER_STRATEGY) — synthesized alongside the three columns above,
+    -- from the same extracted stock fields — see
+    -- contract_extraction.generate_procurement_strategy.
+    PROCUREMENT_STRATEGY       VARIANT,
+    -- One-sentence condensed version of every STOCK_FIELDS value (a JSON
+    -- object keyed by field_key), used only by the 2-page condensed
+    -- Word/PDF output — see contract_extraction.generate_condensed_summary
+    -- and docx_report.build_contract_docx_condensed /
+    -- pdf_report.build_contract_pdf_condensed. The full-length report
+    -- keeps using each field's full FIELD_VALUE untouched.
+    CONDENSED_FIELDS           VARIANT,
     CREATED_AT                    TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
 );
 

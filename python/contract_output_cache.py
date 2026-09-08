@@ -54,6 +54,13 @@ OUTPUT_STAGE_NAME = "CONTRACT_OUTPUT_STAGE"
 _BUILDERS = {
     "docx": (docx_report.build_contract_docx, "Contract_Workspace_Summary.docx"),
     "pdf": (pdf_report.build_contract_pdf, "Contract_Workspace_Summary.pdf"),
+    # Short ~2-page versions (docx_report.build_contract_docx_condensed /
+    # pdf_report.build_contract_pdf_condensed) — same cache/build-live
+    # fallback mechanics as the two full formats above, for free, since
+    # every function in this module iterates _BUILDERS generically rather
+    # than naming "docx"/"pdf" specifically.
+    "docx_condensed": (docx_report.build_contract_docx_condensed, "Contract_Summary_Condensed.docx"),
+    "pdf_condensed": (pdf_report.build_contract_pdf_condensed, "Contract_Summary_Condensed.pdf"),
 }
 
 
