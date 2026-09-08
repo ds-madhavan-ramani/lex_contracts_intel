@@ -109,7 +109,10 @@ _QUESTIONS = {
         "What is the contract term, and what extension options exist — how many, for how long, and under "
         "what conditions? Cite the clause.",
     "COMPLEXITY":
-        "Describe the complexity of the goods and/or services supplied under this contract.",
+        "Describe the complexity of the goods and/or services supplied under this contract, then state a "
+        "single decisive Complexity Rating of Low, Medium, or High — never a hedge between two levels — "
+        "based on factors such as safety-criticality, 24/7 or network-wide delivery, number of distinct "
+        "service streams, and regulatory/compliance obligations.",
     "SEPARABLE_PORTIONS":
         "For procurement purposes, could any part of the services be separately tendered, terminated, or "
         "transferred without affecting the rest? Answer based on how the services are actually delivered as "
@@ -367,10 +370,16 @@ alone doesn't fully resolve it while another does.
 Where a question asks about a risk, obligation, restriction, or
 compliance exposure (not a plain fact like a name, date, or dollar
 figure), end the value with one short sentence assessing the practical
-risk or exposure this creates for the party asking the question, in the
-style "Assessment: consent required; medium risk for ownership or entity
-changes." Skip this sentence for purely factual fields where there is no
-risk judgement to make.
+risk or exposure this creates FOR THE CLIENT who engaged the supplier/
+counterparty named in the SUPPLIER field — i.e. the party this contract
+register is maintained for, reviewing this as its own contracts manager
+would — never the supplier's own risk. For example, a clause restricting
+the SUPPLIER from disclosing information is a low risk to the client (it
+protects the client), not a risk "to the supplier" for being restricted.
+Use this style: "Assessment: consent required; medium risk for ownership
+or entity changes." Commit to exactly one of Low, Medium, or High — never
+hedge between two levels (e.g. "moderate-to-high"). Skip this sentence
+for purely factual fields where there is no risk judgement to make.
 
 QUESTIONS:
 {questions_block}

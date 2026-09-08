@@ -527,6 +527,23 @@ from this environment, though:
   operations) rather than defaulting to a hedged "Moderate" rating that
   can end up inconsistent with what the detailed findings actually say.
 
+  CONFIRMED on a live account (comparing a second CW20841 run against
+  CoPilot's own detailed reference output, which rates risk consistently
+  from the contracting client's side): the risk-assessment instruction's
+  original "risk...for the party asking the question" wording was
+  ambiguous enough that several fields (novation, auto-renewal, change of
+  control) got framed as risk *to the supplier* instead — a restriction
+  on the supplier's ability to disclose information read as "bad for the
+  supplier" rather than "protective of the client," which isn't the
+  perspective this register is kept from. The instruction now says
+  explicitly: risk to the client who engaged the supplier named in the
+  SUPPLIER field, never the supplier's own risk. It also now requires
+  committing to exactly one of Low/Medium/High rather than a hedge like
+  "moderate-to-high" (COMPLEXITY's question asks for this rating
+  explicitly too, since it isn't phrased as a "risk" question and so
+  wasn't reliably triggering the generic risk-sentence instruction on its
+  own).
+
   Document ordering (oldest → newest, so the model can narrate the
   evolution correctly) uses the same `EFFECTIVE_DATE` → `SEQUENCE_NO` →
   filename precedence as `contract_linking.list_family_documents` —
