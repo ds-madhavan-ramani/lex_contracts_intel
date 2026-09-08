@@ -239,6 +239,10 @@ for family in families:
             # Served from the cache the stage-pickup Task (or the button
             # above) already populated; falls back to building it live if
             # nothing's cached yet — see contract_output_cache.get_or_build_output.
+            # The "_condensed" pair is the same content in ~2-page form —
+            # see contract_extraction.generate_condensed_summary /
+            # docx_report.build_contract_docx_condensed /
+            # pdf_report.build_contract_pdf_condensed.
             docx_dl_col, pdf_dl_col = download_col.columns(2)
             docx_dl_col.download_button(
                 "⬇ Word",
@@ -253,6 +257,23 @@ for family in families:
                 file_name=f"{family.cw_number}_Contract_Workspace_Summary.pdf",
                 mime="application/pdf",
                 key=f"download_pdf_{family.contract_id}",
+            )
+            docx_c_dl_col, pdf_c_dl_col = download_col.columns(2)
+            docx_c_dl_col.download_button(
+                "⬇ Word (2-pg)",
+                data=contract_output_cache.get_or_build_output(
+                    session, project, family.contract_id, "docx_condensed"),
+                file_name=f"{family.cw_number}_Contract_Summary_Condensed.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key=f"download_docx_condensed_{family.contract_id}",
+            )
+            pdf_c_dl_col.download_button(
+                "⬇ PDF (2-pg)",
+                data=contract_output_cache.get_or_build_output(
+                    session, project, family.contract_id, "pdf_condensed"),
+                file_name=f"{family.cw_number}_Contract_Summary_Condensed.pdf",
+                mime="application/pdf",
+                key=f"download_pdf_condensed_{family.contract_id}",
             )
 
         if contract_row and contract_row.get("OVERVIEW_SUMMARY"):

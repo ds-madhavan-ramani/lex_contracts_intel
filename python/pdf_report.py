@@ -38,6 +38,7 @@ _DISCLAIMER = (
 )
 _NO_VARIATIONS_TEXT = "No variations, extensions, or novations are currently linked to this contract."
 _NO_ACTIONS_TEXT = "No specific actions flagged."
+_NO_RISKS_TEXT = "No significant commercial risks flagged."
 
 _TABLE_STYLE = TableStyle([
     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2f3e4e")),
@@ -143,8 +144,108 @@ def build_contract_pdf(session, project: ProjectConfig, contract_id: int) -> byt
         for key in contract_extraction.CLASSIFICATION_SCORECARD_FIELDS
     ]))
 
+    strategy = contract.get("PROCUREMENT_STRATEGY") or {}
+    story.append(Paragraph("Key Commercial Risks", styles["LexH2"]))
+    story.append(_bullets(styles, strategy.get("KEY_COMMERCIAL_RISKS") or [], _NO_RISKS_TEXT))
+
+    story.append(Paragraph("Procurement Recommendation", styles["LexH2"]))
+    story.append(_cell(styles, strategy.get("PROCUREMENT_RECOMMENDATION") or "Not yet generated."))
+
+    story.append(Paragraph("Retender Strategy", styles["LexH2"]))
+    story.append(_cell(styles, strategy.get("RETENDER_STRATEGY") or "Not yet generated."))
+
     story.append(Paragraph("Recommended Actions", styles["LexH2"]))
     story.append(_bullets(styles, contract.get("RECOMMENDED_ACTIONS") or [], _NO_ACTIONS_TEXT))
+
+    story.append(Paragraph(_DISCLAIMER, styles["LexNote"]))
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        leftMargin=1.8 * cm, rightMargin=1.8 * cm, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
+        title=title_text,
+    )
+    doc.build(story)
+    return buffer.getvalue()
+
+
+def build_contract_pdf_condensed(session, project: ProjectConfig, contract_id: int) -> bytes:
+    """Builds a short, ~2-page condensed Contract Review Summary — the
+    same section order as build_contract_pdf above, but using
+    CONTRACT_REGISTER.CONDENSED_FIELDS (see
+    contract_extraction.generate_condensed_summary) in place of each
+    field's full paragraph-length FIELD_VALUE, and capping Recommended
+    Actions to its top 5 items — in the same spirit as the CoPilot-
+    generated reference summary CW20841 was benchmarked against. No new
+    Cortex calls here, purely formatting."""
+    contract = contract_linking.get_contract(session, project, contract_id)
+    condensed = contract.get("CONDENSED_FIELDS") or {}
+    fields = {f["FIELD_KEY"]: f for f in contract_extraction.get_contract_fields(session, project, contract_id)}
+    variations = contract_linking.get_significant_variations(session, project, contract_id)
+
+    def condensed_value_of(field_key: str) -> Optional[str]:
+        return condensed.get(field_key) or fields.get(field_key, {}).get("FIELD_VALUE")
+
+    styles = _styles()
+    story = []
+
+    title_text = (
+        contract.get("CONTRACT_TITLE")
+        or f"{condensed_value_of('SUPPLIER') or contract['CW_NUMBER']} - "
+           f"{condensed_value_of('SERVICES') or contract['CW_NUMBER']}"
+    )
+    story.append(Paragraph(title_text, styles["Title"]))
+    story.append(Paragraph("Contract Review Summary and Assessment — Condensed", styles["Normal"]))
+    story.append(Spacer(1, 0.4 * cm))
+
+    story.append(_kv_table(styles, ("Contract detail", "Current position"), [
+        (contract_extraction.FIELD_LABELS[key], condensed_value_of(key))
+        for key in contract_extraction.CONTRACT_DETAIL_FIELDS
+    ]))
+
+    story.append(Paragraph("Executive Assessment", styles["LexH1"]))
+    story.append(_cell(styles, contract.get("OVERVIEW_SUMMARY") or "Not yet generated."))
+    story.append(Spacer(1, 0.3 * cm))
+    story.append(_kv_table(styles, ("Assessment area", "Finding"), [
+        (contract_extraction.FIELD_LABELS[key], condensed_value_of(key))
+        for key in contract_extraction.EXECUTIVE_ASSESSMENT_FIELDS
+    ]))
+
+    story.append(Paragraph("Commercial, Performance and Renewal Assessment", styles["LexH1"]))
+    story.append(_kv_table(styles, ("Assessment area", "Finding"), [
+        (contract_extraction.FIELD_LABELS[key], condensed_value_of(key))
+        for key in contract_extraction.COMMERCIAL_ASSESSMENT_FIELDS
+    ]))
+
+    story.append(Paragraph("Significant Variations", styles["LexH2"]))
+    variation_lines = []
+    for v in variations:
+        label = f"{v['FILE_NAME']} ({v['DOC_ROLE'].replace('_', ' ').title()})"
+        summary = v.get("NODE_SUMMARY") or "not yet indexed"
+        summary = summary if len(summary) <= 160 else summary[:157] + "..."
+        variation_lines.append(f"{label}: {summary}")
+    story.append(_bullets(styles, variation_lines, _NO_VARIATIONS_TEXT))
+
+    story.append(Paragraph("Consolidated Procurement Assessment", styles["LexH2"]))
+    scorecard = contract.get("CLASSIFICATION_SCORECARD") or {}
+    story.append(_kv_table(styles, ("Category", "Assessment"), [
+        (contract_extraction.CLASSIFICATION_SCORECARD_LABELS[key], scorecard.get(key))
+        for key in contract_extraction.CLASSIFICATION_SCORECARD_FIELDS
+    ]))
+
+    strategy = contract.get("PROCUREMENT_STRATEGY") or {}
+    story.append(Paragraph("Key Commercial Risks", styles["LexH2"]))
+    story.append(_bullets(styles, strategy.get("KEY_COMMERCIAL_RISKS") or [], _NO_RISKS_TEXT))
+
+    story.append(Paragraph("Procurement Recommendation", styles["LexH2"]))
+    story.append(_cell(styles, strategy.get("PROCUREMENT_RECOMMENDATION") or "Not yet generated."))
+
+    story.append(Paragraph("Retender Strategy", styles["LexH2"]))
+    story.append(_cell(styles, strategy.get("RETENDER_STRATEGY") or "Not yet generated."))
+
+    story.append(Paragraph("Recommended Actions", styles["LexH2"]))
+    top_actions = (contract.get("RECOMMENDED_ACTIONS") or [])[:5]
+    story.append(_bullets(styles, top_actions, _NO_ACTIONS_TEXT))
 
     story.append(Paragraph(_DISCLAIMER, styles["LexNote"]))
 

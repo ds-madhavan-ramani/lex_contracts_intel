@@ -144,13 +144,18 @@ fields_list = contract_extraction.get_contract_fields(session, project, status.c
 fields = {f["FIELD_KEY"]: f for f in fields_list}
 variations = contract_linking.get_significant_variations(session, project, status.contract_id)
 
-header_col, docx_col, pdf_col = st.columns([4, 1, 1])
+header_col, docx_col, pdf_col, docx_c_col, pdf_c_col = st.columns([3, 1, 1, 1, 1])
 header_col.subheader(contract["CONTRACT_TITLE"] or contract["CW_NUMBER"])
 header_col.caption(contract["CW_NUMBER"])
 
 # Served from the cache the stage-pickup Task (or the extraction buttons
 # above) already populated; falls back to building it live if nothing's
-# cached yet — see contract_output_cache.get_or_build_output.
+# cached yet — see contract_output_cache.get_or_build_output. The
+# "_condensed" pair is the same content in ~2-page form (one-to-two-
+# sentence findings instead of each field's full paragraph) — see
+# contract_extraction.generate_condensed_summary /
+# docx_report.build_contract_docx_condensed /
+# pdf_report.build_contract_pdf_condensed.
 docx_col.download_button(
     "⬇ Word (.docx)",
     data=contract_output_cache.get_or_build_output(session, project, status.contract_id, "docx"),
@@ -161,6 +166,18 @@ pdf_col.download_button(
     "⬇ PDF",
     data=contract_output_cache.get_or_build_output(session, project, status.contract_id, "pdf"),
     file_name=f"{contract['CW_NUMBER']}_Contract_Workspace_Summary.pdf",
+    mime="application/pdf",
+)
+docx_c_col.download_button(
+    "⬇ Word (2-pg)",
+    data=contract_output_cache.get_or_build_output(session, project, status.contract_id, "docx_condensed"),
+    file_name=f"{contract['CW_NUMBER']}_Contract_Summary_Condensed.docx",
+    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+)
+pdf_c_col.download_button(
+    "⬇ PDF (2-pg)",
+    data=contract_output_cache.get_or_build_output(session, project, status.contract_id, "pdf_condensed"),
+    file_name=f"{contract['CW_NUMBER']}_Contract_Summary_Condensed.pdf",
     mime="application/pdf",
 )
 

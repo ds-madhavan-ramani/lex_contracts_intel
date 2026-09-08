@@ -213,6 +213,23 @@ CLASSIFICATION_SCORECARD_LABELS = {
     "RENEWAL_POSITION_RATING": "Renewal position",
 }
 
+# ---------------------------------------------------------------------------
+# Forward-looking procurement wrap-up, rendered after the Consolidated
+# Procurement Assessment scorecard — matching the CoPilot-generated
+# reference summary CW20841 was benchmarked against, which closes with
+# exactly this kind of strategic wrap-up ("Key Commercial Risks" /
+# "Procurement Recommendation" / a retender-vs-renegotiate assessment).
+# SYNTHESIZED from the detailed fields (see generate_procurement_strategy),
+# same reasoning as CLASSIFICATION_SCORECARD_FIELDS above: a roll-up of
+# findings already made, not independently re-derived from raw text.
+# ---------------------------------------------------------------------------
+PROCUREMENT_STRATEGY_FIELDS = ["KEY_COMMERCIAL_RISKS", "PROCUREMENT_RECOMMENDATION", "RETENDER_STRATEGY"]
+PROCUREMENT_STRATEGY_LABELS = {
+    "KEY_COMMERCIAL_RISKS": "Key Commercial Risks",
+    "PROCUREMENT_RECOMMENDATION": "Procurement Recommendation",
+    "RETENDER_STRATEGY": "Retender Strategy",
+}
+
 @dataclass
 class FieldExtractResult:
     field_key: str
@@ -509,9 +526,12 @@ def extract_stock_fields_for_contract(session, project: ProjectConfig, contract_
     ingestion/stage_pickup.py's identical convention.
 
     Also (re)generates the contract's Executive Assessment narrative,
-    Recommended Actions, and classification scorecard once every field has
-    been extracted — see generate_contract_overview,
-    generate_recommended_actions, generate_classification_scorecard.
+    Recommended Actions, classification scorecard, Key Commercial Risks /
+    Procurement Recommendation / Retender Strategy, and the condensed
+    one-sentence-per-field summary once every field has been extracted —
+    see generate_contract_overview, generate_recommended_actions,
+    generate_classification_scorecard, generate_procurement_strategy,
+    generate_condensed_summary.
     """
     schema = project.qualified_schema
     ordered_docs = _get_family_documents_for_extraction(session, project, contract_id)
@@ -563,6 +583,8 @@ def extract_stock_fields_for_contract(session, project: ProjectConfig, contract_
     generate_contract_overview(session, project, contract_id)
     generate_recommended_actions(session, project, contract_id)
     generate_classification_scorecard(session, project, contract_id)
+    generate_procurement_strategy(session, project, contract_id)
+    generate_condensed_summary(session, project, contract_id)
     return results
 
 
@@ -734,6 +756,141 @@ def generate_classification_scorecard(session, project: ProjectConfig, contract_
         params=[json.dumps(scorecard), contract_id],
     ).collect()
     return scorecard
+
+
+_PROCUREMENT_STRATEGY_PROMPT = """Based on the extracted contract assessment
+below, provide a forward-looking procurement wrap-up for a contracts
+manager, in the same spirit as a reviewer's closing recommendation:
+
+- key_commercial_risks: a list of the 3-6 most significant commercial
+  risks this contract poses to the client (the party that engaged the
+  supplier — never the supplier's own risk), each one short sentence,
+  ranked most severe first. Only include risks actually supported by the
+  assessment below — do not invent generic risks that aren't grounded in
+  it.
+- procurement_recommendation: 1-2 sentences recommending an overall course
+  of action for this contract (e.g. continue and monitor; renegotiate at
+  the next extension; begin retender planning), grounded in what the
+  assessment actually shows — not generic boilerplate.
+- retender_strategy: 2-4 sentences on how the client should approach its
+  next decision point for this contract — extend, renegotiate, or
+  retender — covering what leverage or constraints the client has (e.g.
+  notice periods already given, EA/labour cost exposure, KPI performance
+  to date) and what should be reassessed (pricing, security, KPIs, scope)
+  if a new deed or contract is negotiated.
+
+EXTRACTED ASSESSMENT:
+{fields_text}
+
+Return ONLY JSON: {{"key_commercial_risks": ["...", "..."],
+"procurement_recommendation": "...", "retender_strategy": "..."}}
+"""
+
+
+def generate_procurement_strategy(session, project: ProjectConfig, contract_id: int) -> Dict[str, object]:
+    """Synthesizes CONTRACT_REGISTER.PROCUREMENT_STRATEGY — the template's
+    "Key Commercial Risks" / "Procurement Recommendation" / "Retender
+    Strategy" sections, rendered after the Consolidated Procurement
+    Assessment scorecard — from this contract's already-extracted stock
+    fields, matching the CoPilot reference summary CW20841 was
+    benchmarked against, which closes with exactly this kind of
+    forward-looking strategic wrap-up (CONFIRMED missing from this app's
+    own output in that comparison). Returns {} (and clears
+    PROCUREMENT_STRATEGY) if no fields have been extracted yet."""
+    schema = project.qualified_schema
+    fields_text = _answered_fields_text(session, project, contract_id)
+    if not fields_text:
+        session.sql(
+            f"UPDATE {schema}.CONTRACT_REGISTER SET PROCUREMENT_STRATEGY = NULL WHERE CONTRACT_ID = ?",
+            params=[contract_id],
+        ).collect()
+        return {}
+
+    try:
+        result = complete_json(session, project.active_model,
+                               _PROCUREMENT_STRATEGY_PROMPT.format(fields_text=fields_text), max_tokens=1200)
+        strategy = {
+            "KEY_COMMERCIAL_RISKS": [r.strip() for r in result.get("key_commercial_risks", []) if r and r.strip()],
+            "PROCUREMENT_RECOMMENDATION": (result.get("procurement_recommendation") or "").strip(),
+            "RETENDER_STRATEGY": (result.get("retender_strategy") or "").strip(),
+        }
+    except Exception:  # noqa: BLE001 — a synthesis step failing shouldn't fail the whole extraction run
+        logger.warning("EVENT=PROCUREMENT_STRATEGY_FAILED contract_id=%s", contract_id, exc_info=True)
+        strategy = {}
+
+    import json
+    session.sql(
+        f"""UPDATE {schema}.CONTRACT_REGISTER
+            SET PROCUREMENT_STRATEGY = PARSE_JSON(?)
+            WHERE CONTRACT_ID = ?""",
+        params=[json.dumps(strategy), contract_id],
+    ).collect()
+    return strategy
+
+
+_CONDENSED_FIELDS_PROMPT = """Below are detailed findings already
+extracted for a contract, one per field. Compress EACH into ONE short
+sentence (two at most) for a one-to-two-page executive summary: keep the
+single most important fact — a date, dollar figure, party name, or an
+explicit Low/Medium/High risk call already stated in the finding — and
+drop supporting clause-by-clause detail, quotations, and hedging
+language. If a finding is already one short sentence, return it
+essentially unchanged.
+
+FIELDS:
+{fields_block}
+
+Return ONLY JSON: {{"FIELD_KEY": "condensed sentence", ...}} — one entry
+for every field key listed above.
+"""
+
+
+def generate_condensed_summary(session, project: ProjectConfig, contract_id: int) -> Dict[str, str]:
+    """Synthesizes CONTRACT_REGISTER.CONDENSED_FIELDS — a one-to-two-
+    sentence version of every already-extracted stock field, used only by
+    the 2-page condensed Word/PDF output (docx_report.build_contract_docx_condensed
+    / pdf_report.build_contract_pdf_condensed) so that report can fit in
+    roughly the same length as the CoPilot-generated reference summary
+    CW20841 was benchmarked against — the full-length report keeps every
+    field's full paragraph-length FIELD_VALUE untouched. This condenses
+    already-synthesized text, not raw documents, so it's a single cheap
+    call regardless of how large the contract's document family is.
+    Returns {} (and clears CONDENSED_FIELDS) if no fields have been
+    extracted yet."""
+    schema = project.qualified_schema
+    fields = get_contract_fields(session, project, contract_id)
+    answered = [f for f in fields if f.get("FIELD_VALUE")]
+    if not answered:
+        session.sql(
+            f"UPDATE {schema}.CONTRACT_REGISTER SET CONDENSED_FIELDS = NULL WHERE CONTRACT_ID = ?",
+            params=[contract_id],
+        ).collect()
+        return {}
+
+    fields_block = "\n\n".join(
+        f"- {f['FIELD_KEY']} ({FIELD_LABELS.get(f['FIELD_KEY'], f['FIELD_KEY'])}): {f['FIELD_VALUE']}"
+        for f in answered
+    )
+    try:
+        result = complete_json(session, project.active_model,
+                               _CONDENSED_FIELDS_PROMPT.format(fields_block=fields_block), max_tokens=4000)
+        condensed = {
+            key: value.strip()
+            for key, value in result.items()
+            if key in _QUESTIONS and value and value.strip()
+        }
+    except Exception:  # noqa: BLE001 — a synthesis step failing shouldn't fail the whole extraction run
+        logger.warning("EVENT=CONDENSED_SUMMARY_FAILED contract_id=%s", contract_id, exc_info=True)
+        condensed = {}
+
+    import json
+    session.sql(
+        f"""UPDATE {schema}.CONTRACT_REGISTER
+            SET CONDENSED_FIELDS = PARSE_JSON(?)
+            WHERE CONTRACT_ID = ?""",
+        params=[json.dumps(condensed), contract_id],
+    ).collect()
+    return condensed
 
 
 def get_contract_fields(session, project: ProjectConfig, contract_id: int) -> List[dict]:
