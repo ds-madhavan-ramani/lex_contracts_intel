@@ -701,6 +701,34 @@ from this environment, though:
   if the error still recurs — then re-run **Data Sources → Index →
   Rebuild all** for whichever documents failed.
 
+  CONFIRMED on a live account: raising `MAX_JSON_RETRY_TOKENS` and
+  lowering the chunk size wasn't enough for every document — a handful
+  ingested via a later `lex_network_bridge` batch (including a rolling-
+  stock spare-parts catalogue "listing thousands of individual parts,
+  components and repair" items) still truncated even a single 60,000-
+  character chunk's segmentation response, because `DETAILED`
+  granularity's one-section-per-sub-clause instruction has no natural
+  stopping point against genuinely list-shaped content — there's no
+  chunk size small enough to fix that without also shrinking chunks for
+  every normal document. Rather than chase the ceiling further,
+  `_index_one_document` now degrades gracefully per chunk instead of
+  failing the whole document: when a chunk's segmentation call still
+  fails, it falls back to one plain-prose `complete()` summary call for
+  just that chunk (a far smaller ask that in practice doesn't hit this
+  failure mode), contributing zero sections from that chunk but not
+  losing the rest of the document's index or its
+  `CONTRACT_REGISTER`-visible document-level summary. This is a
+  reasonable trade specifically because fine-grained sections aren't
+  read by anything in the live app today (`query_engine.search()` is
+  dormant — see that module's own docstring); only the document-level
+  summary is, via `contract_linking.get_significant_variations`'s
+  Significant Variations display. A document that previously showed up
+  in "N document(s) failed to index" for this exact reason should now
+  index successfully (with a plainer document-level summary and fewer
+  fine-grained sections than a cleanly-structured contract would get) —
+  re-run **Data Sources → Index → "Index new/unindexed documents"** to
+  pick up anything still marked failed from before this fix.
+
 ## Open items
 
 1. **Settled, not pursuing further**: `metrotrains.local` is not directly
