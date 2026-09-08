@@ -602,6 +602,24 @@ from this environment, though:
   own docstring on that being unverified from this environment), so a
   Streamlit-native link outside the iframe is the one that's guaranteed to
   actually open in a new tab.
+
+  CONFIRMED on a live account: one specific document's citation link
+  stayed broken ("Argument 2 to function 'GET_PRESIGNED_URL' cannot be
+  null or empty") across repeated re-extractions even after the
+  empty-relative-path guard above — the real root cause was
+  `SQLBuilder.build_merge_raw_document_by_source_item`'s `WHEN MATCHED`
+  clause only refreshing `FILE_NAME`/`STAGE_PATH`/`SOURCE_TYPE` alongside
+  `RAW_TEXT`/`SOURCE_HASH` when a document's parsed content had changed.
+  This project's stage got dropped/recreated and files re-copied more
+  than once during earlier debugging; a document's `STAGE_PATH` baked in
+  under an earlier, since-fixed ingestion bug was never revisited by a
+  later, correct run once its `SOURCE_HASH` stopped changing. Fixed with
+  a second, unconditional `WHEN MATCHED` clause that always refreshes
+  where a file currently lives, independent of whether its content also
+  changed — a file's stage location this run isn't something that should
+  ever be conditional on its content, unlike `RAW_TEXT`/`SOURCE_HASH`/
+  `PARSED_AT`, which stay conditional (re-parsing/re-indexing is the
+  actually expensive, worth-avoiding part).
 - Only ONE citation is ever recorded per extracted field
   (`CONTRACT_FIELD_EXTRACTS.SOURCE_DOC_ID`/`SOURCE_NODE_ID`/`SOURCE_QUOTE`
   are single columns, not a list) — `_extract_field_group` records
@@ -616,6 +634,25 @@ from this environment, though:
   link per row, not a link per document the value text narrates. Tracking
   every contributing document, not just one, would need a schema change
   (a `CITED_DOCS` VARIANT column or similar) — not done here.
+- Contract Register's **"Filter to one contract"** dropdown existed
+  before this round but only narrowed which contract(s) still rendered
+  inside their own collapsible `st.expander` — functionally a filter, but
+  it kept the "click to open" framing of a multi-contract list even once
+  only one contract was left to show. When exactly one contract is on
+  screen (via that filter, or because only one is linked at all), it now
+  renders as a plain always-visible section instead — no expander, no
+  click needed. Rendering multiple contracts at once (the default "All
+  contracts" state) is unchanged. `Chat.py` and this page's single-
+  contract view also now show the Key Commercial Risks / Procurement
+  Recommendation / Retender Strategy fields live, not just in the
+  downloaded Word/PDF — an oversight from when those fields were added
+  (`docx_report.py`/`pdf_report.py` got them immediately; the live
+  Streamlit views didn't). "Run extraction for all contracts" now reports
+  live per-contract, per-agent progress the same way the single-contract
+  button already did (`extract_stock_fields_for_all_contracts`'s new
+  `on_progress` parameter, prefixing each inner agent message with its
+  own contract's CW number) — it used to be one plain spinner for the
+  whole multi-contract run.
 - Indexing (`ingestion/index_builder.py`) can fail with `Cortex response
   was not valid JSON: Unterminated string...` — CONFIRMED on a live
   account for 3 dense contract documents under

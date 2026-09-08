@@ -588,16 +588,26 @@ def extract_stock_fields_for_contract(session, project: ProjectConfig, contract_
     return results
 
 
-def extract_stock_fields_for_all_contracts(session, project: ProjectConfig) -> dict:
+def extract_stock_fields_for_all_contracts(session, project: ProjectConfig, on_progress=None) -> dict:
     """Runs extract_stock_fields_for_contract for every contract in the
     register — the "Run extraction for all contracts" button, and (at
     Scale-phase volume) what a scheduled Task would call instead of a
-    Streamlit click. Returns {contract_id: [FieldExtractResult, ...]}."""
+    Streamlit click. Returns {contract_id: [FieldExtractResult, ...]}.
+
+    on_progress, when given, is called once per contract plus once per
+    agent within that contract (prefixed with the contract's CW number),
+    matching the single-contract button's live per-agent status line
+    instead of one opaque spinner for the whole multi-contract run."""
     families = contract_linking.list_contract_families(session, project)
-    return {
-        family.contract_id: extract_stock_fields_for_contract(session, project, family.contract_id)
-        for family in families
-    }
+    results = {}
+    for i, family in enumerate(families, start=1):
+        if on_progress:
+            on_progress(f"Contract {i}/{len(families)}: {family.cw_number}…")
+        results[family.contract_id] = extract_stock_fields_for_contract(
+            session, project, family.contract_id,
+            on_progress=(lambda msg, cw=family.cw_number: on_progress(f"{cw}: {msg}")) if on_progress else None,
+        )
+    return results
 
 
 def _answered_fields_text(session, project: ProjectConfig, contract_id: int) -> Optional[str]:
