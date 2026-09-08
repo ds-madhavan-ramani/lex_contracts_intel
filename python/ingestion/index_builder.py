@@ -237,6 +237,23 @@ def build_index_for_project(session, project: ProjectConfig,
     return IndexResult(indexed=indexed, failed=len(errors), errors=errors)
 
 
+# Fallback for a chunk whose fine-grained segmentation JSON keeps
+# truncating even after complete_json()'s own internal retries (a
+# genuinely dense chunk — e.g. a parts catalog listing thousands of
+# individual line items — can make DETAILED granularity ask for more
+# sections than fit in any reasonable token budget). A plain prose ask
+# is a far smaller response and in practice doesn't hit this failure
+# mode — see the try/except around the segmentation call below for why
+# losing an entire document's index over one chunk's section list isn't
+# an acceptable trade.
+_CHUNK_SUMMARY_FALLBACK_PROMPT = """Write a 2-3 sentence summary of what
+this document excerpt covers. Plain prose only, no JSON, no formatting.
+
+EXCERPT:
+{text}
+"""
+
+
 def _chunk_text(text: str, chunk_size: int) -> List[tuple]:
     """Splits text into (chunk_start_offset, chunk_text) pairs of at most
     chunk_size characters each. A document shorter than chunk_size is
@@ -298,19 +315,46 @@ def _index_one_document(session, project: ProjectConfig, doc_id: int, file_name:
         chunk_summaries: List[str] = []
         all_sections = []  # [(abs_start, abs_end, title, summary), ...]
         for chunk_start, chunk_text in chunks:
-            result = complete_json(session, project.active_model,
-                                    prompt_template.format(
-                                        text=chunk_text,
-                                        granularity_instruction=granularity_instruction,
-                                    ),
-                                    max_tokens=max_tokens)
-            chunk_summaries.append(result.get("document_summary", ""))
-            for section in result.get("sections", []):
-                title = _truncate(section.get("title", ""), MAX_NODE_TITLE_CHARS)
-                summary = _truncate(section.get("summary", ""), MAX_NODE_SUMMARY_CHARS)
-                sec_start = section.get("start", 0)
-                sec_end = section.get("end", len(chunk_text))
-                all_sections.append((chunk_start + sec_start, chunk_start + sec_end, title, summary))
+            try:
+                result = complete_json(session, project.active_model,
+                                        prompt_template.format(
+                                            text=chunk_text,
+                                            granularity_instruction=granularity_instruction,
+                                        ),
+                                        max_tokens=max_tokens)
+                chunk_summaries.append(result.get("document_summary", ""))
+                for section in result.get("sections", []):
+                    title = _truncate(section.get("title", ""), MAX_NODE_TITLE_CHARS)
+                    summary = _truncate(section.get("summary", ""), MAX_NODE_SUMMARY_CHARS)
+                    sec_start = section.get("start", 0)
+                    sec_end = section.get("end", len(chunk_text))
+                    all_sections.append((chunk_start + sec_start, chunk_start + sec_end, title, summary))
+            except Exception:  # noqa: BLE001 — see _CHUNK_SUMMARY_FALLBACK_PROMPT's own comment
+                logger.warning("EVENT=INDEX_CHUNK_SEGMENTATION_FAILED doc_id=%s chunk_start=%s",
+                               doc_id, chunk_start, exc_info=True)
+                # CONFIRMED on a live account: a pathologically dense chunk
+                # (a spare-parts catalog listing thousands of line items)
+                # can blow past MAX_JSON_RETRY_TOKENS no matter how much
+                # budget it's given — DETAILED granularity's fine-grained
+                # sections aren't read by anything in the live app today
+                # (only a dormant free-form search feature; see
+                # contract_linking.get_significant_variations for the one
+                # thing DOCUMENT_INDEX actually feeds — the document-level
+                # summary). Losing that summary and every OTHER chunk's
+                # sections over one chunk's section list is a worse
+                # trade-off than contributing zero sections from just this
+                # chunk. A plain prose summary is a far smaller ask that in
+                # practice doesn't hit this failure mode.
+                try:
+                    fallback_summary = complete(
+                        session, project.active_model,
+                        _CHUNK_SUMMARY_FALLBACK_PROMPT.format(text=chunk_text),
+                        max_tokens=300,
+                    )
+                    chunk_summaries.append(fallback_summary)
+                except Exception:  # noqa: BLE001 — even the fallback failing shouldn't lose the rest of the document
+                    logger.warning("EVENT=INDEX_CHUNK_FALLBACK_SUMMARY_FAILED doc_id=%s chunk_start=%s",
+                                   doc_id, chunk_start, exc_info=True)
 
         if len(chunks) == 1:
             document_summary = chunk_summaries[0] if chunk_summaries else ""
