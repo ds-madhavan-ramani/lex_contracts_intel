@@ -202,12 +202,24 @@ if not families:
     st.info("No contracts yet — link a document above to create one.")
 
 # Filter to one contract instead of scrolling/expanding through all of
-# them — "All contracts" (the default) keeps today's behavior unchanged.
+# them. Defaults to nothing selected (index=None) rather than "All
+# contracts" — landing on this page used to immediately render every
+# contract's full detail, which is exactly the "lists all the contracts"
+# friction the filter exists to avoid; nothing renders below until the
+# user actually picks something, "All contracts" included.
 ALL_CONTRACTS_OPTION = "All contracts"
 cw_filter_options = [ALL_CONTRACTS_OPTION] + [f.cw_number for f in families]
-selected_cw = st.selectbox("Filter to one contract", cw_filter_options, key="contract_register_cw_filter")
-if selected_cw != ALL_CONTRACTS_OPTION:
+selected_cw = st.selectbox(
+    "Filter to one contract", cw_filter_options, index=None,
+    placeholder="Select a contract number…", key="contract_register_cw_filter",
+)
+if selected_cw is None:
+    families = []
+elif selected_cw != ALL_CONTRACTS_OPTION:
     families = [f for f in families if f.cw_number == selected_cw]
+
+if selected_cw is None and cw_filter_options[1:]:
+    st.caption("Select a contract above (or \"All contracts\") to see its details.")
 
 single_contract_shown = len(families) == 1
 for family in families:
