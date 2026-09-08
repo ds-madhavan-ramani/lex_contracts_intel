@@ -188,8 +188,11 @@ families = contract_linking.list_contract_families(session, project)
 top_col1, top_col2 = st.columns([3, 1])
 top_col1.subheader(f"Contracts ({len(families)})")
 if top_col2.button("Run extraction for all contracts", type="primary", disabled=not families):
+    status_line = st.empty()
     with st.spinner(f"Running the standard questions across {len(families)} contract(s)…"):
-        results = contract_extraction.extract_stock_fields_for_all_contracts(session, project)
+        results = contract_extraction.extract_stock_fields_for_all_contracts(
+            session, project, on_progress=lambda msg: status_line.caption(msg)
+        )
         for touched_contract_id in results:
             contract_output_cache.cache_contract_outputs(session, project, touched_contract_id)
     st.success("Extraction complete.")
@@ -206,10 +209,22 @@ selected_cw = st.selectbox("Filter to one contract", cw_filter_options, key="con
 if selected_cw != ALL_CONTRACTS_OPTION:
     families = [f for f in families if f.cw_number == selected_cw]
 
+single_contract_shown = len(families) == 1
 for family in families:
-    with st.expander(f"**{family.cw_number}** — {family.contract_title or '(title not yet set)'} "
-                      f"· {family.document_count} document(s) · {family.status}",
-                      expanded=(len(families) == 1)):
+    header_text = (f"**{family.cw_number}** — {family.contract_title or '(title not yet set)'} "
+                   f"· {family.document_count} document(s) · {family.status}")
+    # With exactly one contract on screen (via the filter above, or only
+    # one linked contract existing at all) there's nothing to collapse —
+    # an st.expander still reads as "click to see more" even pre-expanded,
+    # which is exactly the friction the filter is meant to remove. Render
+    # it as a plain, always-visible section instead; only fall back to
+    # the collapsible list when several contracts are shown at once.
+    if single_contract_shown:
+        st.markdown(f"### {header_text}")
+        box = st.container()
+    else:
+        box = st.expander(header_text, expanded=False)
+    with box:
         docs = contract_linking.list_family_documents(session, project, family.contract_id)
         st.markdown("**Linked documents**")
         for d in docs:
@@ -347,6 +362,21 @@ for family in families:
                 cols[1].write(scorecard.get(key) or "_Not yet generated._")
         else:
             st.caption("Not yet generated.")
+
+        strategy = (contract_row or {}).get("PROCUREMENT_STRATEGY") or {}
+        st.markdown("**Key Commercial Risks**")
+        risks = strategy.get("KEY_COMMERCIAL_RISKS") or []
+        if risks:
+            for risk in risks:
+                st.markdown(f"- {risk}")
+        else:
+            st.caption("No significant commercial risks flagged.")
+
+        st.markdown("**Procurement Recommendation**")
+        st.write(strategy.get("PROCUREMENT_RECOMMENDATION") or "_Not yet generated._")
+
+        st.markdown("**Retender Strategy**")
+        st.write(strategy.get("RETENDER_STRATEGY") or "_Not yet generated._")
 
         st.markdown("**Recommended Actions**")
         actions = (contract_row or {}).get("RECOMMENDED_ACTIONS") or []

@@ -248,6 +248,21 @@ with list_col:
     else:
         st.caption("Not yet generated.")
 
+    strategy = contract.get("PROCUREMENT_STRATEGY") or {}
+    st.markdown("### Key Commercial Risks")
+    risks = strategy.get("KEY_COMMERCIAL_RISKS") or []
+    if risks:
+        for risk in risks:
+            st.markdown(f"- {risk}")
+    else:
+        st.caption("No significant commercial risks flagged.")
+
+    st.markdown("### Procurement Recommendation")
+    st.write(strategy.get("PROCUREMENT_RECOMMENDATION") or "_Not yet generated._")
+
+    st.markdown("### Retender Strategy")
+    st.write(strategy.get("RETENDER_STRATEGY") or "_Not yet generated._")
+
     st.markdown("### Recommended Actions")
     actions = contract.get("RECOMMENDED_ACTIONS") or []
     if actions:
