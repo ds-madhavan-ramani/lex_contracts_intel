@@ -506,6 +506,32 @@ from this environment, though:
   instead of one opaque spinner for the whole run. The scheduled Task
   still goes through the stored procedure, unaffected — both paths call
   the identical function underneath, `on_progress` is just `None` there.
+
+  CONFIRMED on a live account: `run_stage_pickup`'s own call to
+  `index_builder.build_index_for_project` was missing `on_progress`
+  entirely, even though that function fully supports it and reports one
+  message per document (`[i/n] filename — indexing…`). A 27-document
+  ingest left the Sync Status log frozen on "Indexing N new/updated
+  document(s)…" for over an hour with no further updates — not
+  necessarily because indexing was stuck, but because nothing from that
+  phase was ever reaching the page regardless of how long it genuinely
+  took. Fixed by threading `on_progress` through. If a run is ever
+  genuinely stuck again with this fix deployed (no per-document line
+  appears for several minutes), it's safe to close/refresh the tab —
+  every ingest/index/extract step in this pipeline is a MERGE or
+  hash-keyed upsert, not an append, so nothing is corrupted by walking
+  away mid-run. To resume cleanly afterward: use **Data Sources → 🌳
+  Index tab → "Index new/unindexed documents"**, not "Check for new
+  files now" again — the inbox files are already drained by that point,
+  so a fresh stage-pickup run would find nothing new and skip indexing
+  entirely (`new_doc_ids` would be empty), silently leaving any
+  documents that didn't finish indexing before the interruption
+  unindexed. The Data Sources button indexes every document not yet in
+  `DOCUMENT_INDEX` regardless of how it got ingested, and already has
+  `on_progress` wired correctly. Extraction still needs a separate
+  manual trigger afterward (Contract Register, per-contract or "Run
+  extraction for all contracts") — the Data Sources indexing button
+  doesn't run it.
 - **Stock-field extraction reads full documents directly, not narrow
   retrieval.** CONFIRMED on a live account: the original design (one
   `query_engine.search()` call per field, scoped to a contract's family
