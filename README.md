@@ -283,30 +283,159 @@ Open the app: Snowsight → **Streamlit** → `LEX_APP`.
 
 ## Using the app
 
-- **Contract Lookup** (`Chat.py` — the filename is a holdover from the
-  template this was forked from; there's no chat feature) — the landing
-  page. Pick a contract number, see its Executive Assessment and every
-  section of the Contract Workspace Summary Template answered from
-  history, click **View source** on any finding to open the citation
-  panel, and download the summary as **Word** or **PDF**. Both are served
-  from `contract_output_cache`'s stage cache — already produced by the
-  async stage-pickup Task or a prior extraction run — falling back to
-  building the file on the spot if nothing's cached yet.
-- **Data Sources** — three tabs: upload/sync the Required Contracts
-  Register workbook; upload contract PDFs/DOCX (flagged if no
-  signed/executed marker is found); manual index rebuild (rarely needed —
-  ingestion indexes automatically). A document can also arrive
-  automatically via the companion `lex_network_bridge` repo's stage-pickup
-  Task — no UI here for that path, it just shows up already ingested.
-- **Contract Register** — the admin view: link a contract's documents
-  (base + variations/extensions/novations) into one family, run/re-run
-  extraction, and review/verify every field with its citation.
-- **Sync Status** — required-contracts coverage (how many are extracted,
-  how many are current) plus raw ingestion/index counts and run history.
-  **Check for new files now** forces a stage-pickup run on the spot
-  (`CALL RUN_LEX_STAGE_PICKUP()`) instead of waiting for the 5-minute
-  scheduled Task — useful right after staging files via the companion
-  `lex_network_bridge` repo.
+The app is four pages, listed in the sidebar in the order you'd normally
+touch them: **Data Sources** (get documents in) → **Sync Status** (watch
+ingestion/indexing/extraction run, and force a run on demand) →
+**Contract Register** (link documents into a contract family, run
+extraction, review/verify) → **Contract Lookup** (the everyday landing
+page — look a contract up, read its answers, download the summary). You
+won't touch all four every time; which ones you need depends on whether
+documents are arriving via the companion `lex_network_bridge` repo or a
+manual upload.
+
+### Which path applies to you
+
+- **Documents arrive via `lex_network_bridge`** (the normal path once
+  it's set up) — copy files into the network drive folder the bridge
+  watches, one CW-numbered subfolder per contract, and the rest is
+  driven from **Sync Status**. See "Workflow A" below.
+- **You have a file on hand right now and don't want to wait for the
+  bridge** — upload it directly on **Data Sources**. See "Workflow B"
+  below. The two paths converge at the same `RAW_DOCUMENTS` table and
+  can be mixed freely (some contracts via the bridge, one-off files via
+  upload).
+
+### Workflow A — documents via `lex_network_bridge`
+
+1. **Copy the files** into the bridge's watched folder, in a subfolder
+   named exactly for the CW number (e.g. `CW12345/CW12345 - Executed
+   Services Agreement.pdf`, plus any amendment/variation deeds in that
+   same subfolder). The bridge pushes these into
+   `NETWORK_DRIVE_INBOX_STAGE` on its own schedule.
+2. *(Optional)* If any of these are brand-new CW numbers, add them to
+   the Required Contracts Register workbook and upload it on
+   **Data Sources → 📋 Required Contracts Register tab → "Sync
+   register."** Not required — `stage_pickup` auto-creates the contract
+   register row from the folder name either way — but this gives it a
+   proper title immediately instead of "(title not yet set)."
+3. **Trigger the pickup.** Either wait for the scheduled Task (every 5
+   minutes), or go to **Sync Status → 🔄 "Check for new files now"** for
+   an immediate run with a live log. One click runs the whole pipeline
+   per file: drain the inbox → OCR/parse → auto-link to its contract
+   (first file for a CW = BASE, later ones = VARIATION) → index →
+   extract every contract touched this run → cache the Word/PDF outputs
+   (full and 2-page condensed, both formats).
+4. **Watch it run.** The log box shows per-file progress
+   (`[i/n] filename — parsing…` → `INGESTED (BASE/VARIATION)`), then
+   per-document indexing progress, then per-contract extraction
+   progress (`Extraction [n/N]: contract …`). This can take a while —
+   ingestion is fast, but extraction now runs 10 sequential Cortex calls
+   per contract, so several contracts at once is not a quick coffee
+   break.
+5. **Check the result.** Below the button, "Required contracts coverage"
+   shows how many of the register's CW numbers have been extracted at
+   least once and how many are current (no linked document has changed
+   since); "Ingestion / indexing" shows raw counts and warns directly if
+   `Documents ingested` > `Documents indexed` (some are still queued or
+   failed — go to Data Sources → Index tab).
+6. **Review on Contract Register** (see "Reviewing and verifying"
+   below), then look the contract up on **Contract Lookup**.
+
+### Workflow B — manual upload on Data Sources
+
+1. *(First time only, or when the register changes)* **Data Sources →
+   📋 Required Contracts Register tab** — upload the `.xlsx` and click
+   **"Sync register."** This is what makes a CW number appear on
+   Contract Lookup at all, independent of whether any document for it
+   has been ingested yet.
+2. **Data Sources → 📤 Upload Contract Files tab** — choose the PDF(s)
+   (rarely DOCX) and click **"Ingest uploaded files."** Indexing runs
+   automatically right after ingestion here — you'll see "Indexed N
+   document(s)" in the result. A file with no "Signed"/"Executed" marker
+   in its name or text is still ingested, just flagged so you can
+   double-check it's the right copy.
+3. **Extraction does NOT run automatically for this path.** Go to
+   **Contract Register**: if the contract number doesn't already exist,
+   use **"🔗 Link documents to a contract"** at the top to assign the
+   uploaded document a CW number and a role (BASE/VARIATION/etc.), then
+   click **"Link."** If the contract already exists and this is a new
+   variation for it, link it the same way.
+4. Still on **Contract Register**, find the contract (use "Filter to one
+   contract" to jump straight to it) and click **"Run/refresh extraction
+   for this contract."** This is also where you'd click **"Run
+   extraction for all contracts"** instead, if you've just linked
+   several contracts' worth of documents in one sitting.
+5. **Review on Contract Register**, then look it up on **Contract
+   Lookup**.
+
+### Reviewing and verifying (Contract Register)
+
+- **"Filter to one contract"** defaults to nothing selected — pick a CW
+  number (or explicitly pick "All contracts") to see detail; with
+  exactly one contract on screen, it renders directly, no expanding
+  needed.
+- Each field shows its extracted value, a confidence badge (🟢 High / 🟡
+  Medium / 🟠 Low / 🔴 Not found), and **"View source"** to open the
+  citation panel — the exact quoted passage plus, for PDFs, a rendered
+  page with the passage highlighted and an "Open original document ↗"
+  link.
+- Toggle **"Show extracted fields as a table"** for a spreadsheet-style
+  view of every field at once (useful for a fast pass over many fields;
+  the boxed per-field view is easier for reading one section closely).
+- Tick **"Verified"** on a field once you've checked it against the
+  source — this is a human sign-off, not something extraction sets
+  itself, and it's cleared automatically if that contract's documents
+  change and extraction re-runs.
+- Download buttons give four formats: **Word** and **PDF** (the full
+  Contract Workspace Summary), and **Word (2-pg)** / **PDF (2-pg)** (the
+  condensed version — one-to-two-sentence findings instead of full
+  paragraphs, for a quick read or to hand to someone who doesn't need
+  the full detail).
+
+### Recovering from a stuck or partially-failed run
+
+- **A run looks frozen mid-indexing** (no per-document progress line for
+  several minutes): it's safe to close or refresh the tab — every
+  ingest/index/extract step is a `MERGE`/hash-keyed upsert, not an
+  append, so nothing is corrupted by walking away mid-run. **Don't**
+  click "Check for new files now" again to resume — the inbox is
+  already drained, so a fresh run finds no new files and skips indexing
+  entirely, silently leaving anything unfinished stuck unindexed
+  forever. Instead use **Data Sources → 🌳 Index tab → "Index
+  new/unindexed documents"** — it indexes everything not yet in the
+  index regardless of how it arrived, and reports live per-document
+  progress.
+- **A document shows up in "N document(s) failed to index"**: click
+  **Data Sources → 🌳 Index tab → "Index new/unindexed documents"**
+  again once you've redeployed a fix, or after any transient failure —
+  this button is always safe to re-run, since `rebuild=False` means it
+  only touches documents that aren't indexed yet, never re-doing
+  successful ones.
+- **After resolving either of the above, extraction still needs a
+  separate trigger** — neither Data Sources index button runs
+  extraction. Go to **Contract Register** and run it for the affected
+  contract(s).
+- **"Rebuild all"** (Data Sources → Index tab) re-indexes every
+  document from scratch, including ones that already succeeded — only
+  needed after a segmentation-profile/granularity change, never as a
+  routine fix.
+
+### Quick reference: every button, where it lives, and when to use it
+
+| Page → tab | Button / control | What it does | When to use it |
+|---|---|---|---|
+| Data Sources → Required Contracts Register | Sync register | Adds CW numbers from an uploaded `.xlsx` to `CONTRACT_REGISTER` | The register workbook changes, or before a first bridge run for brand-new CW numbers |
+| Data Sources → Upload Contract Files | Ingest uploaded files | Ingests + indexes the chosen PDF/DOCX file(s) immediately | You have a file on hand and don't want to wait for the bridge |
+| Data Sources → Index | Index new/unindexed documents | Indexes every document not yet in `DOCUMENT_INDEX`, live progress | After any indexing failure or interrupted run; always safe to re-run |
+| Data Sources → Index | Rebuild all | Re-indexes every document from scratch | Only after a segmentation profile/granularity change |
+| Sync Status | Check for new files now | Runs the full bridge pipeline once (drain → ingest → index → extract), live log | Right after staging files via the bridge, instead of waiting 5 minutes |
+| Contract Register | 🔗 Link documents to a contract | Assigns an unlinked document a CW number + role | After a manual upload, or to fix a wrongly-linked document (unlink first) |
+| Contract Register | Filter to one contract | Narrows the page to one CW number (or "All contracts") | Always, once you know which contract you're reviewing — the default is nothing selected |
+| Contract Register | Run/refresh extraction for this contract | Runs the 10-agent extraction for one contract, live progress | After linking new/changed documents to that contract |
+| Contract Register | Run extraction for all contracts | Same, looped over every contract in the register | After a batch of manual uploads/links across several contracts |
+| Contract Register | Show extracted fields as a table | Switches the per-field boxed view to a spreadsheet view | Reviewing many fields quickly, or exporting the confidence/verified columns visually |
+| Contract Register | Verified checkbox | Human sign-off on one field | After checking a field's "View source" citation against the real document |
+| Contract Register / Contract Lookup | ⬇ Word / PDF / Word (2-pg) / PDF (2-pg) | Downloads the Contract Workspace Summary in that format | Full formats for the record; 2-pg for a fast read or handoff |
 
 ## Removing the project
 
