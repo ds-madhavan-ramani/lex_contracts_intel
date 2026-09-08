@@ -621,12 +621,15 @@ def _answered_fields_text(session, project: ProjectConfig, contract_id: int) -> 
 
 
 _OVERVIEW_PROMPT = """Write a short executive assessment of this contract
-(4-6 sentences) for a contracts manager who has never seen it — what it
-is, the parties if named, its scope, its term, and anything unusual or
-requiring attention (e.g. an unusual termination, novation, or
-auto-renewal provision; a short-dated expiry; missing information). Base
-it only on the information given below. Write it as plain prose, not a
-bulleted list, in a professional, direct tone.
+for a contracts manager who has never seen it, in EXACTLY 4-6 sentences
+and NO MORE THAN 120 WORDS TOTAL — this is a top-of-page elevator
+summary, not a briefing. Cover: what it is, the parties if named, its
+scope, its term, and only the ONE or TWO most important things requiring
+attention. Do not itemize a list of issues, even inside prose (no
+"First,... Second,... Third,..." or similar enumeration) — the detailed
+findings already live in the tables below this summary; this is the
+short version that sits above them. Base it only on the information
+given below. Write it as plain prose, in a professional, direct tone.
 
 EXTRACTED FIELDS:
 {fields_text}
@@ -643,8 +646,14 @@ def generate_contract_overview(session, project: ProjectConfig, contract_id: int
     if not fields_text:
         return None
 
+    # CONFIRMED on a live account: the prior "4-6 sentences" instruction
+    # alone wasn't followed reliably — the model produced a numbered,
+    # multi-paragraph list of issues well past 6 sentences instead, and
+    # the generous max_tokens=600 ceiling didn't push back on that. The
+    # tighter word cap above plus a much lower ceiling here forces actual
+    # brevity rather than just asking nicely for it.
     overview = complete(session, project.active_model,
-                        _OVERVIEW_PROMPT.format(fields_text=fields_text), max_tokens=600)
+                        _OVERVIEW_PROMPT.format(fields_text=fields_text), max_tokens=300)
 
     schema = project.qualified_schema
     session.sql(
