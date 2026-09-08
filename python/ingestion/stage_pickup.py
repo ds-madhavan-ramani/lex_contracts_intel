@@ -431,7 +431,15 @@ def run_stage_pickup(session, project_code: str = "LEX", on_progress: ProgressCa
     if new_doc_ids:
         _report(on_progress, f"Indexing {len(new_doc_ids)} new/updated document(s)…")
         from ingestion.index_builder import build_index_for_project
-        index_result = build_index_for_project(session, project, doc_ids=new_doc_ids, rebuild=True)
+        # on_progress was missing here before -- CONFIRMED on a live account
+        # as the reason a 27-document indexing run left the Sync Status log
+        # frozen on the line above for over an hour with no further updates:
+        # index_builder.py's own per-document "[i/n] filename — indexing…"
+        # messages were being generated the whole time, just never reaching
+        # this caller because on_progress wasn't threaded through — not
+        # necessarily evidence the run was actually stuck.
+        index_result = build_index_for_project(session, project, doc_ids=new_doc_ids, rebuild=True,
+                                               on_progress=on_progress)
     else:
         index_result = None
 
