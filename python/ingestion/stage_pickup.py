@@ -343,7 +343,20 @@ def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFil
                 # a diagnostic count matters more here than most failures,
                 # since a human won't otherwise learn anything new from the
                 # 50th identical retry.
-                error_detail = f"Parsed text too short ({parsed_len} char(s), need {MIN_PARSED_TEXT_CHARS})"
+                stripped = raw_text.strip()
+                if not stripped:
+                    preview_detail = "no visible text extracted at all"
+                else:
+                    # Show the literal characters OCR found — repr() so
+                    # whitespace-only/control-character "text" (a common
+                    # symptom of a scanned blank/signature page) is visibly
+                    # distinguishable from real short content, without the
+                    # user needing SQL/file access to tell the difference.
+                    preview_detail = f"all OCR found: {stripped[:200]!r}"
+                error_detail = (
+                    f"Parsed text too short ({parsed_len} char(s), need "
+                    f"{MIN_PARSED_TEXT_CHARS}) — {preview_detail}"
+                )
                 results.append(PickupResult(item.file_name, item.cw_number, "FAILED",
                                              error=error_detail))
                 _report(on_progress, f"[{i}/{len(staged)}] {item.file_name} — FAILED ({error_detail})")
