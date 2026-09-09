@@ -925,7 +925,15 @@ from this environment, though:
   corrupt/blank/image-unreadable PDF worth opening directly to check,
   while a count just under 100 points at `MIN_PARSED_TEXT_CHARS` itself
   being stricter than a genuinely short but valid document (e.g. a
-  one-page amendment) needs.
+  one-page amendment) needs. It now also shows the actual extracted text
+  itself — `"— no visible text extracted at all"` when OCR found literal
+  whitespace only (the clearest sign of a blank scanned page), or
+  `"— all OCR found: '...'"` with up to 200 characters of whatever OCR did
+  produce otherwise — so a low character count that turns out to be
+  genuine garbage/noise (a corrupt or unreadable scan) is visibly
+  different from a low count that's a real short fragment, all from the
+  Sync Status banner, with no need to open the file or query Snowflake
+  directly to tell which one you're looking at.
 
 ## Open items
 
