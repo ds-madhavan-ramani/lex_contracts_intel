@@ -55,6 +55,30 @@ _TABLE_STYLE = TableStyle([
 ])
 
 
+def _page_header_footer(cw_number: str, title: str, label: str):
+    """Returns a reportlab onFirstPage/onLaterPages callback that repeats
+    the contract's identity and which of the two output lengths this is
+    on every page. SimpleDocTemplate's flowable content has no built-in
+    running header/footer concept — a page-canvas callback is reportlab's
+    documented mechanism for drawing the same thing on every page
+    independent of the flowable layout, matching what
+    docx_report._set_header_footer does for the Word outputs."""
+    header_text = f"{cw_number} | {title}" if title else cw_number
+    footer_text = f"{cw_number} — {label}"
+
+    def _draw(canvas, doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.HexColor("#666666"))
+        page_width, page_height = doc.pagesize
+        canvas.drawString(1.8 * cm, page_height - 1.1 * cm, header_text[:110])
+        canvas.drawString(1.8 * cm, 1.0 * cm, footer_text)
+        canvas.drawRightString(page_width - 1.8 * cm, 1.0 * cm, f"Page {doc.page}")
+        canvas.restoreState()
+
+    return _draw
+
+
 def _styles():
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle("LexCellText", parent=styles["BodyText"], fontSize=9, leading=12))
@@ -165,7 +189,8 @@ def build_contract_pdf(session, project: ProjectConfig, contract_id: int) -> byt
         leftMargin=1.8 * cm, rightMargin=1.8 * cm, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
         title=title_text,
     )
-    doc.build(story)
+    header_footer = _page_header_footer(contract["CW_NUMBER"], title_text, "Detailed Summary")
+    doc.build(story, onFirstPage=header_footer, onLaterPages=header_footer)
     return buffer.getvalue()
 
 
@@ -235,7 +260,10 @@ def build_contract_pdf_condensed(session, project: ProjectConfig, contract_id: i
 
     strategy = contract.get("PROCUREMENT_STRATEGY") or {}
     story.append(Paragraph("Key Commercial Risks", styles["LexH2"]))
-    story.append(_bullets(styles, strategy.get("KEY_COMMERCIAL_RISKS") or [], _NO_RISKS_TEXT))
+    # Capped like Recommended Actions below -- generate_procurement_strategy's
+    # own prompt asks for 3-6, ranked most severe first, so the top 4 keeps
+    # the most important ones within this format's page budget.
+    story.append(_bullets(styles, (strategy.get("KEY_COMMERCIAL_RISKS") or [])[:4], _NO_RISKS_TEXT))
 
     story.append(Paragraph("Procurement Recommendation", styles["LexH2"]))
     story.append(_cell(styles, strategy.get("PROCUREMENT_RECOMMENDATION") or "Not yet generated."))
@@ -255,5 +283,6 @@ def build_contract_pdf_condensed(session, project: ProjectConfig, contract_id: i
         leftMargin=1.8 * cm, rightMargin=1.8 * cm, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
         title=title_text,
     )
-    doc.build(story)
+    header_footer = _page_header_footer(contract["CW_NUMBER"], title_text, "Condensed Summary")
+    doc.build(story, onFirstPage=header_footer, onLaterPages=header_footer)
     return buffer.getvalue()

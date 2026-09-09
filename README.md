@@ -169,9 +169,10 @@ Contract Workspace Summary (docx/pdf, unchanged) and a condensed pair
 (`CONTRACT_REGISTER.CONDENSED_FIELDS`, see
 `contract_extraction.generate_condensed_summary`) instead of its full
 paragraph-length `FIELD_VALUE`, Significant Variations summaries are
-truncated, and Recommended Actions is capped to its top 5 items — in the
-same spirit as the CoPilot-generated reference summary CW20841 was
-benchmarked against, which is itself only about a page long.
+truncated, and Recommended Actions AND Key Commercial Risks are each
+capped to their top 4-5 items — in the same spirit as the CoPilot-
+generated reference summary CW20841 was benchmarked against, which is
+itself only about a page long.
 `generate_condensed_summary` is a single cheap synthesis call (it
 compresses already-extracted text, not raw documents, so its cost doesn't
 scale with the size of the contract's document family) run once per
@@ -184,6 +185,41 @@ contract data; a mock run with representative-length fake data rendered
 to 2 pages via reportlab's own pagination (checked by counting `/Type
 /Page` objects in the raw PDF bytes), which is encouraging but not a
 substitute for checking a real extraction's condensed output directly.
+
+All four outputs (`.docx`/`.pdf` × full/condensed) now repeat the
+contract's CW number and title in a running header, and which of the two
+lengths it is ("Detailed Summary" / "Condensed Summary") in a running
+footer, on every page — `docx_report._set_header_footer` for both `.docx`
+builders, `pdf_report._page_header_footer` (a reportlab canvas callback,
+since `SimpleDocTemplate`'s flowable content has no built-in running
+header/footer concept) for both `.pdf` builders. CONFIRMED bug this
+fixes, not just a missing feature: the bundled template
+(`assets/Contract_Workspace_Summary_Template.docx`) already had a
+header/footer, but its placeholder text was hardcoded to the literal CW
+number/wording from whichever contract the template was originally
+authored against ("CW20841 | Contract Review Summary" /
+"Commercial review summary | ...") — every generated `.docx` for every
+OTHER contract was silently carrying that same wrong CW number in its
+header, not an obviously-blank placeholder. `build_contract_docx` never
+touched the header/footer before this fix, so the bug was invisible
+unless someone happened to compare two different contracts' downloaded
+files side by side. The PDF header/footer's actual rendered content is
+UNVERIFIED from this environment — no PDF-parsing library is available
+here to extract and check drawn canvas text, so this was checked only as
+"the build doesn't crash and the page count is unaffected," not visually
+proofed in a real PDF viewer.
+
+The full and condensed outputs' underlying CONTENT is identical by
+construction, in both formats — all four builders read from the exact
+same `contract_linking.get_contract`/`contract_extraction.get_contract_fields`
+calls (condensed field values additionally reading
+`CONTRACT_REGISTER.CONDENSED_FIELDS`) rather than each assembling its own
+copy of the data — so a report/word discrepancy would be a real bug in
+one specific builder, not an architectural gap. What legitimately differs
+between `.docx` and `.pdf` of the SAME length is visual styling only
+(the Word template's own formatting vs. reportlab's independent layout —
+see `pdf_report.py`'s own module docstring), which is by design, not a
+defect.
 
 ## Project configuration
 
@@ -789,6 +825,23 @@ from this environment, though:
   link per row, not a link per document the value text narrates. Tracking
   every contributing document, not just one, would need a schema change
   (a `CITED_DOCS` VARIANT column or similar) — not done here.
+- **Every extracted field carries a citation unless it's genuinely
+  `NOT_FOUND`** — `SOURCE_DOC_ID` is set whenever the model named a
+  source at all, independent of whether a verbatim quote also verified.
+  `_confidence_for_full_text` used to collapse "named a source but no
+  single sentence verified word-for-word" into the same `LOW` bucket as
+  "the model didn't name a source at all" — misleading specifically for
+  this architecture, where a field's value routinely synthesizes a fact
+  across several documents (e.g. "originally $X [Document 1], increased
+  to $Y [Document 3]") and so has no ONE sentence that captures the whole
+  synthesized answer, even though it's well-grounded. Split into a
+  `MEDIUM` tier for exactly that case; `LOW` is now reserved for the
+  genuinely rare case of a real answer with no named source at all.
+  `citation_panel_ui.render_citation_panel` was also silently showing
+  nothing for a `MEDIUM` field (gated on `SOURCE_QUOTE` alone) — it now
+  shows the source document name and an "Open original document" link
+  even without a highlightable quote, with an honest note that no single
+  passage could be verified word-for-word.
 - Contract Register's **"Filter to one contract"** dropdown existed
   before this round but only narrowed which contract(s) still rendered
   inside their own collapsible `st.expander` — functionally a filter, but
@@ -857,6 +910,22 @@ from this environment, though:
   fine-grained sections than a cleanly-structured contract would get) —
   re-run **Data Sources → Index → "Index new/unindexed documents"** to
   pick up anything still marked failed from before this fix.
+- A DIFFERENT, unrelated failure — `"Parsed text too short"` — happens at
+  ingestion, before a document even reaches indexing: `AI_PARSE_DOCUMENT`
+  produced under `config.MIN_PARSED_TEXT_CHARS` (100) characters of OCR
+  text for that file. CONFIRMED on a live account as a genuinely
+  persistent failure for one specific document across many separate
+  stage-pickup runs, not a transient one — `_mark_processed` deliberately
+  never marks a `FAILED` file as processed (see that function's own
+  docstring), so it's retried on every future run until it's fixed or
+  replaced on the network drive, which also means a human staring at the
+  Nth identical retry learns nothing new from the bare message alone. The
+  error now includes the actual character count (`"Parsed text too short
+  (N char(s), need 100)"`) — a handful of characters points at a
+  corrupt/blank/image-unreadable PDF worth opening directly to check,
+  while a count just under 100 points at `MIN_PARSED_TEXT_CHARS` itself
+  being stricter than a genuinely short but valid document (e.g. a
+  one-page amendment) needs.
 
 ## Open items
 
