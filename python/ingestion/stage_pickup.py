@@ -328,10 +328,25 @@ def pick_up_staged_files(session, project: ProjectConfig, staged: List[StagedFil
                 ).collect()
                 raw_text = _extract_text(parsed[0]["RESULT"])
 
-            if len(raw_text.strip()) < MIN_PARSED_TEXT_CHARS:
+            parsed_len = len(raw_text.strip())
+            if parsed_len < MIN_PARSED_TEXT_CHARS:
+                # The bare "too short" message gave no way to tell a
+                # genuinely near-empty/corrupt/image-unreadable PDF (a few
+                # characters, or zero) from a real but unusually short
+                # document sitting just under the threshold — surfacing the
+                # actual count is the difference between "go look at this
+                # file, something's wrong with it" and "maybe just raise
+                # MIN_PARSED_TEXT_CHARS's floor". This file is retried on
+                # every future stage-pickup run until it's fixed/replaced on
+                # the network drive (FAILED files are deliberately never
+                # marked processed — see _mark_processed's own docstring) —
+                # a diagnostic count matters more here than most failures,
+                # since a human won't otherwise learn anything new from the
+                # 50th identical retry.
+                error_detail = f"Parsed text too short ({parsed_len} char(s), need {MIN_PARSED_TEXT_CHARS})"
                 results.append(PickupResult(item.file_name, item.cw_number, "FAILED",
-                                             error="Parsed text too short"))
-                _report(on_progress, f"[{i}/{len(staged)}] {item.file_name} — FAILED (parsed text too short)")
+                                             error=error_detail))
+                _report(on_progress, f"[{i}/{len(staged)}] {item.file_name} — FAILED ({error_detail})")
                 continue
 
             # Hashed on parsed text, not file bytes — matches

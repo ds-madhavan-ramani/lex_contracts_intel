@@ -131,6 +131,28 @@ def _set_single_run_text(paragraph, text: str) -> None:
         extra._element.getparent().remove(extra._element)
 
 
+def _set_header_footer(document, cw_number: str, title: str, label: str) -> None:
+    """Every page of the generated document repeats which contract this is
+    and which of the two output lengths it is — without this, a reader who
+    scrolls past page 1 (or receives just a printed page 3) has no way to
+    tell. CONFIRMED bug in the bundled template this fixes: its own
+    header/footer placeholders were hardcoded to literal text from
+    whichever contract the template was originally authored against
+    ("CW20841 | Contract Review Summary" / "Commercial review summary |
+    Prepared from the supplied contract review document") — every
+    generated .docx for every OTHER contract was silently showing that
+    same wrong CW number in its header, not a blank/generic placeholder
+    that would have been obviously wrong. The condensed .docx has no
+    template to inherit a header/footer from at all (it's a fresh
+    document — see build_contract_docx_condensed), so this also gives it
+    one for the first time."""
+    section = document.sections[0]
+    header_para = section.header.paragraphs[0] if section.header.paragraphs else section.header.add_paragraph()
+    _set_single_run_text(header_para, f"{cw_number} | {title}" if title else cw_number)
+    footer_para = section.footer.paragraphs[0] if section.footer.paragraphs else section.footer.add_paragraph()
+    _set_single_run_text(footer_para, f"{cw_number} — {label}")
+
+
 def _replace_bullet_list(blocks, heading_index: int, items: List[str],
                          empty_text: str = _NO_VARIATIONS_TEXT) -> None:
     """Replaces every consecutive 'List Bullet' paragraph immediately
@@ -210,6 +232,7 @@ def build_contract_docx(session, project: ProjectConfig, contract_id: int) -> by
         or f"{value_of('SUPPLIER') or contract['CW_NUMBER']} - {value_of('SERVICES') or contract['CW_NUMBER']}"
     )
     _set_single_run_text(title_para, title_text)
+    _set_header_footer(document, contract["CW_NUMBER"], title_text, "Detailed Summary")
 
     # --- Contract detail table ---
     contract_detail_table = _find_table_by_marker(blocks, "Supplier")
@@ -318,6 +341,7 @@ def build_contract_docx_condensed(session, project: ProjectConfig, contract_id: 
     )
     document.add_heading(title_text, level=0)
     document.add_paragraph("Contract Review Summary and Assessment — Condensed")
+    _set_header_footer(document, contract["CW_NUMBER"], title_text, "Condensed Summary")
 
     def add_kv_table(header, rows):
         table = document.add_table(rows=1, cols=2)
@@ -368,7 +392,10 @@ def build_contract_docx_condensed(session, project: ProjectConfig, contract_id: 
 
     strategy = contract.get("PROCUREMENT_STRATEGY") or {}
     document.add_heading("Key Commercial Risks", level=2)
-    add_bullets(strategy.get("KEY_COMMERCIAL_RISKS") or [], _NO_RISKS_TEXT)
+    # Capped like Recommended Actions below -- generate_procurement_strategy's
+    # own prompt asks for 3-6, ranked most severe first, so the top 4 keeps
+    # the most important ones within this format's page budget.
+    add_bullets((strategy.get("KEY_COMMERCIAL_RISKS") or [])[:4], _NO_RISKS_TEXT)
 
     document.add_heading("Procurement Recommendation", level=2)
     document.add_paragraph(strategy.get("PROCUREMENT_RECOMMENDATION") or "Not yet generated.")

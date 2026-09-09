@@ -332,16 +332,32 @@ def _extract_highlight_phrase(session, project: ProjectConfig, answer_text: str,
     return phrase[:500]
 
 
-def _confidence_for_full_text(value: str, quote: str) -> str:
+def _confidence_for_full_text(value: str, quote: str, source_doc_id: Optional[int]) -> str:
     """Same honest-heuristic spirit as this module's earlier retrieval-based
     version: HIGH when grounded in a verified verbatim quote, NOT_FOUND
-    when the model explicitly said the documents don't address it, LOW
-    otherwise (a value with no verifiable quote — worth a reviewer's eye)."""
+    when the model explicitly said the documents don't address it.
+
+    Between those two: every field still carries a citation — SOURCE_DOC_ID
+    always names which document a value came from unless it's genuinely
+    NOT_FOUND (get_contract_fields joins RAW_DOCUMENTS on it regardless of
+    confidence, and the citation panel opens on it the same way for every
+    confidence level) — but a value synthesized across several documents
+    (e.g. "originally $X [Document 1], increased to $Y [Document 3]",
+    exactly what this architecture is designed to produce) often has no
+    SINGLE verbatim sentence that captures the whole synthesized answer,
+    so _extract_field_group's quote check can legitimately come back empty
+    even when the value is well-grounded. Collapsing that into the same
+    LOW bucket as a value with no named source at all was misleading —
+    MEDIUM distinguishes "has a citation, just not word-for-word verified"
+    from LOW's "the model didn't even name a source for this," which is
+    the genuinely rare, worth-a-look case."""
     lowered = (value or "").strip().lower()
     if not lowered or _NOT_ADDRESSED_TEXT.lower() in lowered:
         return "NOT_FOUND"
     if quote:
         return "HIGH"
+    if source_doc_id:
+        return "MEDIUM"
     return "LOW"
 
 
@@ -546,7 +562,7 @@ def extract_stock_fields_for_contract(session, project: ProjectConfig, contract_
         for field_key in field_keys:
             entry = parsed[field_key]
             value, source_doc_id, quote = entry["value"], entry["source_doc_id"], entry["quote"]
-            confidence = _confidence_for_full_text(value, quote)
+            confidence = _confidence_for_full_text(value, quote, source_doc_id)
             highlight_phrase = _extract_highlight_phrase(session, project, value, quote) if quote else None
 
             session.sql(

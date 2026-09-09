@@ -17,32 +17,50 @@ import citation_viewer
 
 
 def render_citation_panel(session, project, field: dict) -> None:
-    """field is one entry from contract_extraction.get_contract_fields()."""
+    """field is one entry from contract_extraction.get_contract_fields().
+
+    A field's SOURCE_DOC_ID (and thus this panel's file_name/stage_path)
+    is set whenever the model named a source at all — including a
+    MEDIUM-confidence field whose value was synthesized across several
+    documents and so has no single verbatim sentence that captures the
+    whole answer (see contract_extraction._confidence_for_full_text).
+    That's still a real, openable citation, just not a highlightable
+    exact quote — showing nothing for it (the old behavior, gated on
+    quote alone) understated how grounded a MEDIUM field actually is."""
     quote = field.get("SOURCE_QUOTE")
     phrase = field.get("HIGHLIGHT_PHRASE")
     file_name = field.get("SOURCE_FILE_NAME")
     stage_path = field.get("SOURCE_STAGE_PATH")
 
-    if not quote:
-        st.caption("No cited passage recorded for this answer.")
+    if not quote and not file_name:
+        st.caption("No cited source recorded for this answer.")
         return
 
-    st.markdown(f"**Cited passage** — {file_name or 'unknown source'}")
-    if phrase and phrase.lower() in quote.lower():
-        # Case-insensitive highlight of the exact phrase within the exact
-        # quote — both stored verbatim from the source at extraction time,
-        # so this never needs the fuzzy matching the PDF viewer below does.
-        idx = quote.lower().index(phrase.lower())
-        before, matched, after = quote[:idx], quote[idx:idx + len(phrase)], quote[idx + len(phrase):]
-        body = (
-            f"{_html.escape(before)}<mark>{_html.escape(matched)}</mark>{_html.escape(after)}"
+    if quote:
+        st.markdown(f"**Cited passage** — {file_name or 'unknown source'}")
+        if phrase and phrase.lower() in quote.lower():
+            # Case-insensitive highlight of the exact phrase within the
+            # exact quote — both stored verbatim from the source at
+            # extraction time, so this never needs the fuzzy matching the
+            # PDF viewer below does.
+            idx = quote.lower().index(phrase.lower())
+            before, matched, after = quote[:idx], quote[idx:idx + len(phrase)], quote[idx + len(phrase):]
+            body = (
+                f"{_html.escape(before)}<mark>{_html.escape(matched)}</mark>{_html.escape(after)}"
+            )
+        else:
+            body = _html.escape(quote)
+        st.markdown(
+            f"<div style='white-space:pre-wrap; font-size:0.92rem; line-height:1.5;'>{body}</div>",
+            unsafe_allow_html=True,
         )
     else:
-        body = _html.escape(quote)
-    st.markdown(
-        f"<div style='white-space:pre-wrap; font-size:0.92rem; line-height:1.5;'>{body}</div>",
-        unsafe_allow_html=True,
-    )
+        st.markdown(f"**Source** — {file_name or 'unknown source'}")
+        st.caption(
+            "This finding is drawn from the document below, but no single "
+            "exact passage could be verified word-for-word — open the "
+            "source to confirm directly."
+        )
 
     if not file_name or not stage_path:
         return
